@@ -87,3 +87,33 @@ async def get_students_below_threshold(db: AsyncSession, threshold: float = 50.0
     )
     result = await db.execute(stmt)
     return result.scalars().all()
+
+
+# ---------- Automated Feedback Logs ----------
+# This function is used to log interactions with the AI for audit and analysis purposes.
+# It stores the prompt and response, along with metadata about the student and quiz.
+# This allows us to track how the AI is being used and analyze the effectiveness of the feedback.
+async def log_automated_interaction(
+    db: AsyncSession,
+    student_id: int,
+    quiz_id: int,
+    prompt: str,
+    response: str,
+    simplified_mode: bool = False
+) -> models.AIFeedbackLog:
+    """
+    Log an automated content generation interaction.
+    Stores the prompt and response for audit and analysis.
+    """
+    log_entry = models.AIFeedbackLog(
+        student_id=student_id,
+        quiz_id=quiz_id,
+        prompt=prompt,
+        ai_response=response,
+        simplified_mode=simplified_mode
+    )
+    db.add(log_entry)
+    await db.commit()
+    await db.refresh(log_entry)
+    logger.info(f"Logged automated interaction for student {student_id}")
+    return log_entry

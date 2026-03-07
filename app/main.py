@@ -50,3 +50,8 @@ app.include_router(reports.router, prefix="/api", tags=["Teacher Reports"])
 @app.get("/")
 async def root():
     return {"message": "Kipaji Chetu API is running."}
+
+
+"""
+run with: uvicorn app.main:app --reload - in the root directory of the project
+"""

@@ -26,7 +26,7 @@ class Student(StudentBase):
     created_at: datetime
 
     class Config:
-        from_attributes = True  # orm_mode
+        from_attributes = True
 
 # ---------- Topic ----------
 class TopicBase(BaseModel):
@@ -85,6 +85,10 @@ class QuizAttempt(QuizAttemptBase):
 
     class Config:
         from_attributes = True
+
+# ---------- QuizAttempt with feedback (for submit response)
+class QuizAttemptWithFeedback(QuizAttempt):
+    feedback: Optional[str] = None
 
 # ---------- Answer Submission Request ----------
 class AnswerSubmission(BaseModel):
