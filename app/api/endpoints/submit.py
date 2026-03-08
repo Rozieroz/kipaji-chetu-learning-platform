@@ -63,7 +63,7 @@ async def submit_answer(
         # Store attempt in database
         attempt = await crud.create_quiz_attempt(db, attempt_data)
         
-        # Log the automated interaction for audit
+        # Log the automated(ai) interaction for audit
         await crud.log_automated_interaction(
             db=db,
             student_id=student.id,
@@ -82,4 +82,8 @@ async def submit_answer(
         logger.error(f"Failed to store attempt or log interaction: {e}")
         raise HTTPException(status_code=500, detail="Database error")
     
+    # call update_student_difficulty after storing the attempt to ensure we have the latest data for the student
+    await crud.update_student_difficulty(db, submission.student_id)
+
     return attempt
+

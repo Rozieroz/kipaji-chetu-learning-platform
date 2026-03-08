@@ -1,6 +1,6 @@
 """
-Async functions to interact with the database- to be used by the endpoints.
 CRUD operations for database models.
+Async functions to interact with the database- to be used by the endpoints.
 All functions are async and use SQLAlchemy 1.4+ async syntax.
 """
 
@@ -117,3 +117,45 @@ async def log_automated_interaction(
     await db.refresh(log_entry)
     logger.info(f"Logged automated interaction for student {student_id}")
     return log_entry
+
+
+# recalculate a student's preferred difficulty based on recent quiz scores.
+# This can be called after each quiz attempt to adjust the difficulty of future quizzes for that student.
+
+
+async def update_student_difficulty(db: AsyncSession, student_id: int):
+    """
+    Recalculate student's preferred difficulty based on last 5 quiz attempts.
+    If average score > 80% -> hard
+    If average score < 50% -> easy
+    Else -> medium
+
+    => to be called in submit endpoint after storing the attempt to ensure we have the latest data for the student.
+    """
+    # Get last 5 attempts for the student
+    result = await db.execute(
+        select(models.QuizAttempt)
+        .where(models.QuizAttempt.student_id == student_id)
+        .order_by(models.QuizAttempt.created_at.desc())
+        .limit(5)
+    )
+    attempts = result.scalars().all()
+    
+    if not attempts:
+        return  # No attempts yet, keep current
+    
+    avg_score = sum(a.score for a in attempts) / len(attempts)
+    
+    new_difficulty = "medium"
+    if avg_score >= 80:
+        new_difficulty = "hard"
+    elif avg_score <= 50:
+        new_difficulty = "easy"
+    
+    # Update student record
+    student = await db.get(models.Student, student_id)
+    if student and student.preferred_difficulty != new_difficulty:
+        student.preferred_difficulty = new_difficulty
+        db.add(student)
+        await db.commit()
+        logger.info(f"Updated student {student_id} difficulty to {new_difficulty}")

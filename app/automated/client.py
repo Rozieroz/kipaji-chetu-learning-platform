@@ -30,7 +30,7 @@ class AutomatedContentService:
         
         self.client = AsyncGroq(
             api_key=self.api_key,
-            # Zero Data Retention is automatic - no additional config needed
+            # Zero Data Retention is set, no additional configuration needed for ZDR
         )
         
         # Model selection based on task complexity and speed requirements

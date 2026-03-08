@@ -8,7 +8,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.endpoints import submit, progress, reports
+from app.api.endpoints import submit, progress, reports, questions, tts
 
 # Configure logging
 logging.basicConfig(
@@ -46,6 +46,10 @@ app.add_middleware(
 app.include_router(submit.router, prefix="/api", tags=["Student Actions"])
 app.include_router(progress.router, prefix="/api", tags=["Student Progress"])
 app.include_router(reports.router, prefix="/api", tags=["Teacher Reports"])
+app.include_router(questions.router, prefix="/api", tags=["Quiz Questions"])
+app.include_router(tts.router, prefix="/api", tags=["Text-to-Speech"])
+
+
 
 @app.get("/")
 async def root():

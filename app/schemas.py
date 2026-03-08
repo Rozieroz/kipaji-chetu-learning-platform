@@ -16,6 +16,8 @@ class StudentBase(BaseModel):
     email: EmailStr
     learning_mode: Optional[str] = "normal"
     accessibility_enabled: Optional[bool] = False
+    risk_score: float
+    created_at: datetime
 
 class StudentCreate(StudentBase):
     pass
@@ -23,6 +25,7 @@ class StudentCreate(StudentBase):
 class Student(StudentBase):
     id: int
     risk_score: float
+    preferred_difficulty: Optional[str] = "medium"  
     created_at: datetime
 
     class Config:
