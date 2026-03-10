@@ -2,8 +2,6 @@
                               # FastAPI server,   PostgreSQL database
 # manage them together
 
-version: '3.8'
-
 services:
   app:
     build: .
@@ -14,9 +12,6 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       GROQ_API_KEY: ${GROQ_API_KEY}
       SCHEMA: ${SCHEMA}
-    depends_on:
-      db:
-        condition: service_healthy
     volumes:
       - ./static:/app/static      # for live updates during dev
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
