@@ -22,10 +22,14 @@ DB_PASSWORD = os.getenv("password")
 DB_HOST = os.getenv("host")
 DB_PORT = os.getenv("port")
 DB_NAME = os.getenv("database")
-DB_SCHEMA = os.getenv("schema", "public")
+DB_SCHEMA = os.getenv("SCHEMA")
 
 # Build async connection URL (postgresql+asyncpg://...)- for SQLAlchemy async engine
-ASYNC_DB_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+# ASYNC_DB_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+ASYNC_DB_URL = os.getenv("DATABASE_URL_ASYNC")      # uses ssl for asyncpg not sslmode
+if not ASYNC_DB_URL:
+    raise ValueError("DATABASE_URL_ASYNC environment variable is not set")
+
 
 # Create async engine
 engine = create_async_engine(

@@ -15,7 +15,7 @@ INSERT INTO employees (first_name, second_name, salary, country) VALUES
 ('Alice', 'Johnson', 55000, 'Canada');
 
 -- Step 2: Add FULL_NAME column
-ALTER TABLE employees ADD COLUMN full_name VARCHAR(100);
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS full_name VARCHAR(100);
 
 -- Step 3: Update with concatenated names
 UPDATE employees

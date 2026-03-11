@@ -7,3 +7,6 @@ python-dotenv==1.2.2
 scikit_learn==1.7.2
 SQLAlchemy==2.0.23
 uvicorn
+asyncpg
+pydantic[email]
+python-multipart

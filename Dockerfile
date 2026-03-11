@@ -24,7 +24,7 @@ COPY ./app/static ./static
 ENV PYTHONPATH=/app
 
 # actual values come from the .env file and docker-compose.yml
-ENV DATABASE_URL=               
+ENV DATABASE_URL_ASYNC=               
 ENV GROQ_API_KEY=
 
 # Run the app with uvicorn (python -m uvicorn)

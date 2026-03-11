@@ -5,16 +5,22 @@ All tables reside in the configured schema.
 Map the tables created in 01_create_tables.sql to SQLAlchemy models. Use __table_args__ to set the schema
 """
 
-from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, Text, CheckConstraint, UniqueConstraint, Index
+from sqlalchemy import (
+    Column, Integer, String, Float, Boolean, ForeignKey, Text,
+    CheckConstraint, UniqueConstraint, Index, TIMESTAMP
+)
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 from app.database import Base
 import os
-from sqlalchemy.sql import func
-from sqlalchemy import TIMESTAMP
+
+# Ensure schema is always lowercase and defaults to 'public'
+SCHEMA = os.getenv("SCHEMA", "public").lower()
+
 
 class Student(Base):
     __tablename__ = "students"
-    __table_args__ = {"schema": os.getenv("schema", "public")}
+    __table_args__ = {"schema": SCHEMA}
 
     id = Column(Integer, primary_key=True, index=True)
     first_name = Column(String(100), nullable=False)
@@ -34,7 +40,7 @@ class Student(Base):
 
 class Topic(Base):
     __tablename__ = "topics"
-    __table_args__ = {"schema": os.getenv("schema", "public")}
+    __table_args__ = {"schema": SCHEMA}
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(150), nullable=False)
@@ -48,10 +54,13 @@ class Topic(Base):
 
 class Quiz(Base):
     __tablename__ = "quizzes"
-    __table_args__ = {"schema": os.getenv("schema", "public")}
+    __table_args__ = (
+        CheckConstraint("correct_answer IN ('A','B','C','D')", name="check_correct_answer"),
+        {"schema": SCHEMA}
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    topic_id = Column(Integer, ForeignKey(f"{os.getenv('schema', 'public')}.topics.id", ondelete="CASCADE"))
+    topic_id = Column(Integer, ForeignKey(f"{SCHEMA}.topics.id", ondelete="CASCADE"))
     question = Column(Text, nullable=False)
     option_a = Column(Text, nullable=False)
     option_b = Column(Text, nullable=False)
@@ -66,19 +75,18 @@ class Quiz(Base):
     attempts = relationship("QuizAttempt", back_populates="quiz")
     feedback_logs = relationship("AIFeedbackLog", back_populates="quiz")
 
-    __table_args__ = (
-        CheckConstraint("correct_answer IN ('A','B','C','D')", name="check_correct_answer"),
-        {"schema": os.getenv("schema", "public")}
-    )
-
 
 class QuizAttempt(Base):
     __tablename__ = "quiz_attempts"
-    __table_args__ = {"schema": os.getenv("schema", "public")}
+    __table_args__ = (
+        CheckConstraint("selected_answer IN ('A','B','C','D')", name="check_selected_answer"),
+        CheckConstraint("score >= 0 AND score <= 100", name="check_score_range"),
+        {"schema": SCHEMA}
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(Integer, ForeignKey(f"{os.getenv('schema', 'public')}.students.id", ondelete="CASCADE"))
-    quiz_id = Column(Integer, ForeignKey(f"{os.getenv('schema', 'public')}.quizzes.id", ondelete="CASCADE"))
+    student_id = Column(Integer, ForeignKey(f"{SCHEMA}.students.id", ondelete="CASCADE"))
+    quiz_id = Column(Integer, ForeignKey(f"{SCHEMA}.quizzes.id", ondelete="CASCADE"))
     selected_answer = Column(String(1))
     is_correct = Column(Boolean)
     score = Column(Float)  # 0-100
@@ -89,23 +97,17 @@ class QuizAttempt(Base):
     student = relationship("Student", back_populates="quiz_attempts")
     quiz = relationship("Quiz", back_populates="attempts")
 
-    __table_args__ = (
-        CheckConstraint("selected_answer IN ('A','B','C','D')", name="check_selected_answer"),
-        CheckConstraint("score >= 0 AND score <= 100", name="check_score_range"),
-        {"schema": os.getenv("schema", "public")}
-    )
-
 
 class PerformanceLog(Base):
     __tablename__ = "performance_logs"
     __table_args__ = (
         UniqueConstraint("student_id", "topic_id", name="unique_student_topic"),
-        {"schema": os.getenv("schema", "public")}
+        {"schema": SCHEMA}
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(Integer, ForeignKey(f"{os.getenv('schema', 'public')}.students.id", ondelete="CASCADE"))
-    topic_id = Column(Integer, ForeignKey(f"{os.getenv('schema', 'public')}.topics.id", ondelete="CASCADE"))
+    student_id = Column(Integer, ForeignKey(f"{SCHEMA}.students.id", ondelete="CASCADE"))
+    topic_id = Column(Integer, ForeignKey(f"{SCHEMA}.topics.id", ondelete="CASCADE"))
     average_score = Column(Float)
     improvement_rate = Column(Float)
     mastery_level = Column(Float)
@@ -117,11 +119,11 @@ class PerformanceLog(Base):
 
 class AIFeedbackLog(Base):
     __tablename__ = "ai_feedback_logs"
-    __table_args__ = {"schema": os.getenv("schema", "public")}
+    __table_args__ = {"schema": SCHEMA}
 
     id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(Integer, ForeignKey(f"{os.getenv('schema', 'public')}.students.id", ondelete="CASCADE"))
-    quiz_id = Column(Integer, ForeignKey(f"{os.getenv('schema', 'public')}.quizzes.id"))
+    student_id = Column(Integer, ForeignKey(f"{SCHEMA}.students.id", ondelete="CASCADE"))
+    quiz_id = Column(Integer, ForeignKey(f"{SCHEMA}.quizzes.id"))
     prompt = Column(Text)
     ai_response = Column(Text)
     simplified_mode = Column(Boolean, default=False)
@@ -133,15 +135,14 @@ class AIFeedbackLog(Base):
 
 class TeacherNote(Base):
     __tablename__ = "teacher_notes"
-    __table_args__ = {"schema": os.getenv("schema", "public")}
+    __table_args__ = {"schema": SCHEMA}
 
     id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(Integer, ForeignKey(f"{os.getenv('schema', 'public')}.students.id", ondelete="CASCADE"))
+    student_id = Column(Integer, ForeignKey(f"{SCHEMA}.students.id", ondelete="CASCADE"))
     note = Column(Text)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     student = relationship("Student", back_populates="teacher_notes")
-
 
 """
 Table	            Purpose

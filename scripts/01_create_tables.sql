@@ -1,6 +1,6 @@
 -- 01_create_tables.sql
 -- Production-ready schema for Kipaji Chetu
-
+-- run in
 -- Students table: stores learner profile & adaptive settings
 CREATE TABLE IF NOT EXISTS students (
     id SERIAL PRIMARY KEY,
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS teacher_notes (
 );
 
 -- Indexes for performance
-CREATE INDEX idx_quiz_attempts_student ON quiz_attempts(student_id);
-CREATE INDEX idx_quiz_attempts_quiz ON quiz_attempts(quiz_id);
-CREATE INDEX idx_performance_logs_student ON performance_logs(student_id);
-CREATE INDEX idx_ai_feedback_student ON ai_feedback_logs(student_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_attempts_student ON quiz_attempts(student_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_attempts_quiz ON quiz_attempts(quiz_id);
+CREATE INDEX IF NOT EXISTS idx_performance_logs_student ON performance_logs(student_id);
+CREATE INDEX IF NOT EXISTS idx_ai_feedback_student ON ai_feedback_logs(student_id);
