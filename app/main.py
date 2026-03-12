@@ -8,7 +8,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.endpoints import submit, progress, reports, questions, tts, stt
+from app.api.endpoints import submit, progress, reports, questions, tts, stt, student, topics
 
 # Mount static files for frontend (if needed)
 from fastapi.staticfiles import StaticFiles
@@ -59,7 +59,8 @@ app.include_router(reports.router, prefix="/api", tags=["Teacher Reports"])
 app.include_router(questions.router, prefix="/api", tags=["Quiz Questions"])
 app.include_router(tts.router, prefix="/api", tags=["Text-to-Speech"])
 app.include_router(stt.router, prefix="/api", tags=["Speech-to-Text"])
-
+app.include_router(student.router, prefix="/api", tags=["Students"])
+app.include_router(topics.router, prefix="/api", tags=["Topics"])
 
 
 

@@ -29,6 +29,7 @@ class Student(Base):
     learning_mode = Column(String(50), default="normal")
     accessibility_enabled = Column(Boolean, default=False)
     risk_score = Column(Float, default=0.0)
+    preferred_difficulty = Column(String(10), default="medium")   
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     # Relationships

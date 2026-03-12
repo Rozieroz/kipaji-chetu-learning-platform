@@ -878,9 +878,18 @@ function skeletonOptions() {
 }
 
 function renderQuestion(data) {
-  const txt     = data.question ?? data.question_text ?? data.text ?? '(no question)';
-  const options = data.options  ?? data.choices ?? data.answers ?? [];
-
+  const txt = data.question ?? data.question_text ?? data.text ?? '(no question)';
+  // Try to get options from either 'options' array or individual fields
+  let options = data.options ?? data.choices ?? [];
+  if (options.length === 0) {
+    // Build options from option_a, option_b, etc.
+    options = [
+      data.option_a,
+      data.option_b,
+      data.option_c,
+      data.option_d
+    ].filter(opt => opt != null);
+  }
   document.getElementById('qText').textContent = txt;
   document.getElementById('btnTtsQuestion').style.display = 'inline-flex';
 
@@ -915,19 +924,28 @@ function selectOption(idx) {
    SUBMIT ANSWER
 =============================================================== */
 async function submitAnswer() {
-  if (state.selectedIdx===null || state.answered) return;
+  if (state.selectedIdx === null || state.answered) return;
 
-  const data    = state.question;
-  const options = data.options ?? data.choices ?? data.answers ?? [];
-  const selOpt  = options[state.selectedIdx];
-  const selText = typeof selOpt==='string' ? selOpt : selOpt?.text ?? String(state.selectedIdx);
+  const data = state.question;
+
+  // Get the selected button and its letter
+  const selectedButton = document.querySelector('.opt-btn.selected');
+  if (!selectedButton) {
+    toast('No answer selected', 'err');
+    return;
+  }
+  const letterEl = selectedButton.querySelector('.opt-letter');
+  const letter = letterEl ? letterEl.textContent : null;
+  if (!letter || !['A', 'B', 'C', 'D'].includes(letter)) {
+    toast('Invalid answer selection', 'err');
+    return;
+  }
 
   const payload = {
-    student_id:   state.student.id,
-    question_id:  data.id ?? data.question_id,
-    topic_id:     state.topicId,
-    answer:       selText,
-    answer_index: state.selectedIdx,
+    student_id: state.student.id,
+    question_id: data.id ?? data.question_id,
+    answer: letter,               // send the letter directly
+    answer_index: state.selectedIdx, // keep for backward compatibility
   };
 
   setBtnLoading('btnSubmit', true);
@@ -953,16 +971,16 @@ async function submitAnswer() {
     setStep(4);
 
     document.getElementById('btnSubmit').style.display = 'none';
-    document.getElementById('btnNext').style.display   = 'inline-flex';
-    document.getElementById('sttBlock').style.display  = 'block';
+    document.getElementById('btnNext').style.display = 'inline-flex';
+    document.getElementById('sttBlock').style.display = 'block';
 
-    toast(correct ? '✓ Correct! Well done.' : '✗ Not quite — check the feedback.', correct?'ok':'err');
+    toast(correct ? '✓ Correct! Well done.' : '✗ Not quite — check the feedback.', correct ? 'ok' : 'err');
 
     if (state.student?.accessibility_enabled) {
       const fbText = result.feedback ?? result.explanation ?? '';
-      if (fbText) setTimeout(()=>speakRaw(fbText), 900);
+      if (fbText) setTimeout(() => speakRaw(fbText), 900);
     }
-  } catch(err) {
+  } catch (err) {
     document.getElementById('qErr').innerHTML = `<i class="bi bi-exclamation-circle"></i> ${esc(err.message)}`;
     document.getElementById('qErr').style.display = 'flex';
     setBtnLoading('btnSubmit', false, '<i class="bi bi-check-lg"></i> Submit Answer');

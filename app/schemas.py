@@ -116,3 +116,11 @@ class TeacherReport(BaseModel):
     struggling_students: List[dict]  # student id, name, avg score
     most_difficult_topics: List[dict]  # topic name, avg score
     at_risk_students: List[dict]  # students with risk_score > threshold
+
+# for frontend submisson
+class AnswerSubmissionFrontend(BaseModel):
+    student_id: int
+    question_id: int          # maps to quiz_id
+    topic_id: int             # optional, can be ignored
+    answer: str               # full text of selected option
+    answer_index: int         # optional, can be used to identify letter
