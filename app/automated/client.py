@@ -17,6 +17,8 @@ from typing import Dict, Any, Optional
 from groq import AsyncGroq
 from groq import RateLimitError, APIError
 
+import random
+
 logger = logging.getLogger(__name__)
 
 class AutomatedContentService:
@@ -77,9 +79,14 @@ class AutomatedContentService:
         """
         Generate a multiple-choice quiz question on a given topic.
         Returns question with 4 options, correct answer, and explanation.
+        Includes a random seed to ensure variety.
         """
+
+        seed = random.randint(1, 10000)
+
         prompt = f"""
         Create a {difficulty} difficulty multiple-choice quiz question about {topic}.
+        Use a different question than usual (seed: {seed})
         Return in this exact JSON format:
         {{
             "question": "the question text",
@@ -97,7 +104,7 @@ class AutomatedContentService:
             response = await self.client.chat.completions.create(
                 model=self.models["quiz_generation"],
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
+                temperature=0.9,                # the higher it isthe more random
                 response_format={"type": "json_object"},
                 max_tokens=500
             )

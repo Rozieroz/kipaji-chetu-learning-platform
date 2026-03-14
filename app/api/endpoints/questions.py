@@ -1,12 +1,12 @@
 """
-GET /next-question endpoint.
-Returns a quiz question of appropriate difficulty for the student.
+GET /next-question/{student_id}/{topic_id} endpoint.
+Returns a quiz question of appropriate difficulty that the student hasn't seen.
 """
 
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from app import models, schemas
 from app.database import get_db
 from app.automated.client import automated_service
@@ -21,9 +21,9 @@ async def get_next_question(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Return a quiz question for the given student and topic.
+    Return a quiz question for the given student and topic that they haven't seen before.
     Difficulty is determined by the student's preferred_difficulty.
-    If no suitable question exists in the database, generate one via Groq and store it.
+    If no suitable unseen question exists, generate one via Groq and store it.
     """
     # Fetch student and topic
     student = await db.get(models.Student, student_id)
@@ -34,27 +34,45 @@ async def get_next_question(
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
     
-    # Determine target difficulty
     target_difficulty = student.preferred_difficulty or "medium"
     
-    # Try to find an existing question for this topic and difficulty
-    # Optionally ensure the student hasn't seen it recently (simplified: just pick any)
+    # Get IDs of questions this student has already attempted
+    subquery = (
+        select(models.QuizAttempt.quiz_id)
+        .where(models.QuizAttempt.student_id == student_id)
+        .subquery()
+    )
+    
+    # Try 1: Exact difficulty, unseen
     stmt = (
         select(models.Quiz)
         .where(models.Quiz.topic_id == topic_id)
         .where(models.Quiz.difficulty_level == target_difficulty)
+        .where(models.Quiz.id.not_in(subquery))
         .order_by(models.Quiz.created_at.desc())
         .limit(1)
     )
     result = await db.execute(stmt)
     question = result.scalar_one_or_none()
     
+    # Try 2: Any difficulty, unseen
+    if not question:
+        stmt = (
+            select(models.Quiz)
+            .where(models.Quiz.topic_id == topic_id)
+            .where(models.Quiz.id.not_in(subquery))
+            .order_by(models.Quiz.created_at.desc())
+            .limit(1)
+        )
+        result = await db.execute(stmt)
+        question = result.scalar_one_or_none()
+    
     if question:
-        logger.info(f"Found existing question {question.id} for topic {topic_id}, difficulty {target_difficulty}")
+        logger.info(f"Found unseen question {question.id} for student {student_id}")
         return question
     
-    # No existing question – generate one via Groq
-    logger.info(f"No question found for topic {topic_id}, difficulty {target_difficulty}. Generating...")
+    # No unseen questions – generate new one
+    logger.info(f"No unseen questions for student {student_id}, generating...")
     generated = await automated_service.generate_quiz_question(
         topic=topic.name,
         difficulty=target_difficulty
@@ -78,6 +96,6 @@ async def get_next_question(
     db.add(new_quiz)
     await db.commit()
     await db.refresh(new_quiz)
-    logger.info(f"Generated and stored new quiz {new_quiz.id}")
+    logger.info(f"Generated and stored new quiz {new_quiz.id} for student {student_id}")
     
     return new_quiz

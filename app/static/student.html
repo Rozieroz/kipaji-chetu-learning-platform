@@ -842,7 +842,6 @@ async function loadNextQuestion() {
   document.getElementById('qText').textContent           = 'Loading question…';
   document.getElementById('optionsList').innerHTML       = skeletonOptions();
   document.getElementById('feedbackBlock').style.display = 'none';
-  document.getElementById('feedbackBlock').innerHTML     = '';
   document.getElementById('btnSubmit').style.display     = 'inline-flex';
   document.getElementById('btnSubmit').disabled          = true;
   document.getElementById('btnNext').style.display       = 'none';
@@ -853,7 +852,7 @@ async function loadNextQuestion() {
 
   try {
     const res = await fetch(`${API}/next-question/${state.student.id}/${state.topicId}`);
-    if (!res.ok) throw new Error(`Could not load question (${res.status}). Try refreshing.`);
+    if (!res.ok) throw new Error(`Could not load question (${res.status}).`);
     const data = await res.json();
     state.question = data;
     renderQuestion(data);
@@ -944,6 +943,7 @@ async function submitAnswer() {
   const payload = {
     student_id: state.student.id,
     question_id: data.id ?? data.question_id,
+    topic_id: state.topicId,           // t
     answer: letter,               // send the letter directly
     answer_index: state.selectedIdx, // keep for backward compatibility
   };
