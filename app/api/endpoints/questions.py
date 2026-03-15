@@ -1,9 +1,10 @@
 """
 GET /next-question/{student_id}/{topic_id} endpoint.
-Returns a quiz question of appropriate difficulty that the student hasn't seen.
+Returns a quiz question with built-in variety.
 """
 
 import logging
+import random
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
@@ -21,9 +22,8 @@ async def get_next_question(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Return a quiz question for the given student and topic that they haven't seen before.
-    Difficulty is determined by the student's preferred_difficulty.
-    If no suitable unseen question exists, generate one via Groq and store it.
+    Return a quiz question for the given student with variety.
+    Rotates through available questions and generates new ones as needed.
     """
     # Fetch student and topic
     student = await db.get(models.Student, student_id)
@@ -43,45 +43,106 @@ async def get_next_question(
         .subquery()
     )
     
-    # Try 1: Exact difficulty, unseen
+    # STRATEGY 1: Try to find an unseen question of any difficulty first
     stmt = (
         select(models.Quiz)
         .where(models.Quiz.topic_id == topic_id)
-        .where(models.Quiz.difficulty_level == target_difficulty)
         .where(models.Quiz.id.not_in(subquery))
         .order_by(models.Quiz.created_at.desc())
-        .limit(1)
+        .limit(5)  # Get up to 5 unseen questions
     )
     result = await db.execute(stmt)
-    question = result.scalar_one_or_none()
+    unseen_questions = result.scalars().all()
     
-    # Try 2: Any difficulty, unseen
-    if not question:
-        stmt = (
-            select(models.Quiz)
-            .where(models.Quiz.topic_id == topic_id)
-            .where(models.Quiz.id.not_in(subquery))
-            .order_by(models.Quiz.created_at.desc())
-            .limit(1)
-        )
-        result = await db.execute(stmt)
-        question = result.scalar_one_or_none()
+    if unseen_questions:
+        # Randomly select one of the unseen questions
+        selected = random.choice(unseen_questions)
+        logger.info(f"Selected random unseen question {selected.id} for student {student_id}")
+        return selected
     
-    if question:
-        logger.info(f"Found unseen question {question.id} for student {student_id}")
-        return question
+    # STRATEGY 2: If no unseen questions, get ALL questions for this topic
+    stmt = (
+        select(models.Quiz)
+        .where(models.Quiz.topic_id == topic_id)
+        .order_by(models.Quiz.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    all_questions = result.scalars().all()
     
-    # No unseen questions – generate new one
-    logger.info(f"No unseen questions for student {student_id}, generating...")
+    if all_questions:
+        # Student has seen all questions - pick a random one for review
+        # This is better than generating new ones constantly
+        selected = random.choice(all_questions)
+        logger.info(f"All questions seen - recycling question {selected.id} for student {student_id}")
+        return selected
+    
+    # STRATEGY 3: No questions exist at all - generate one
+    logger.info(f"No questions found for topic {topic_id}, generating new one...")
+    
+    # Get recent questions to avoid repetition (from database)
+    recent_stmt = (
+        select(models.Quiz.question)
+        .where(models.Quiz.topic_id == topic_id)
+        .order_by(models.Quiz.created_at.desc())
+        .limit(5)
+    )
+    recent_result = await db.execute(recent_stmt)
+    recent_questions = [q[0] for q in recent_result.fetchall()]
+    
     generated = await automated_service.generate_quiz_question(
         topic=topic.name,
-        difficulty=target_difficulty
+        difficulty=target_difficulty,
+        recent_questions=recent_questions
     )
     
     if "error" in generated:
-        raise HTTPException(status_code=503, detail=generated["error"])
+        # If generation fails, create a simple fallback question
+        fallback_questions = [
+            {
+                "question": "What is 2 + 2?",
+                "option_a": "3",
+                "option_b": "4", 
+                "option_c": "5",
+                "option_d": "6",
+                "correct_answer": "B"
+            },
+            {
+                "question": "What is the capital of France?",
+                "option_a": "London",
+                "option_b": "Berlin",
+                "option_c": "Paris",
+                "option_d": "Madrid", 
+                "correct_answer": "C"
+            },
+            {
+                "question": "Which planet is known as the Red Planet?",
+                "option_a": "Venus",
+                "option_b": "Mars",
+                "option_c": "Jupiter",
+                "option_d": "Saturn",
+                "correct_answer": "B"
+            }
+        ]
+        fallback = random.choice(fallback_questions)
+        
+        new_quiz = models.Quiz(
+            topic_id=topic_id,
+            question=fallback["question"],
+            option_a=fallback["option_a"],
+            option_b=fallback["option_b"],
+            option_c=fallback["option_c"],
+            option_d=fallback["option_d"],
+            correct_answer=fallback["correct_answer"],
+            difficulty_level=target_difficulty,
+            ai_generated=False
+        )
+        db.add(new_quiz)
+        await db.commit()
+        await db.refresh(new_quiz)
+        logger.info(f"Created fallback question {new_quiz.id}")
+        return new_quiz
     
-    # Create new quiz record
+    # Create and store the AI-generated question
     new_quiz = models.Quiz(
         topic_id=topic_id,
         question=generated["question"],
@@ -96,6 +157,6 @@ async def get_next_question(
     db.add(new_quiz)
     await db.commit()
     await db.refresh(new_quiz)
-    logger.info(f"Generated and stored new quiz {new_quiz.id} for student {student_id}")
+    logger.info(f"Generated and stored new quiz {new_quiz.id}")
     
     return new_quiz

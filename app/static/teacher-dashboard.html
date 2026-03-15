@@ -493,7 +493,7 @@
   <div class="section-label mt-2">Bonus Tools</div>
   <div class="row g-4">
 
-    <!-- Speech-to-Text -->
+    <!-- Speech-to-Text - Real-time recording -->
     <div class="col-lg-6">
       <div class="panel bonus-panel">
         <div class="panel-header">
@@ -502,19 +502,49 @@
         </div>
         <div class="bonus-body">
           <p style="font-size:0.82rem;color:var(--muted);margin-bottom:14px;">
-            Upload an audio file to POST <code style="color:var(--accent)">/api/stt</code>
+            Test real-time speech recognition with your microphone
           </p>
-          <label class="custom-file-label" for="stt-file-input" id="sttFileLabel">
-            <i class="bi bi-cloud-upload"></i>
-            <span id="sttFileName">Click to choose audio file…</span>
-          </label>
-          <input type="file" id="stt-file-input" accept="audio/*" onchange="onSttFileChange(this)" />
-          <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;">
-            <button class="btn-action" id="sttBtn" onclick="runStt()" disabled>
-              <i class="bi bi-arrow-right-circle"></i> Transcribe
+          
+          <!-- Recording Controls -->
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:15px;">
+            <button class="btn-action" id="teacherStartRecord" onclick="teacherStartRecording()" 
+                    style="background:var(--accent2); color:white;">
+              <i class="bi bi-mic-fill"></i> Start Recording
             </button>
+            <button class="btn-action" id="teacherStopRecord" onclick="teacherStopRecording()" disabled
+                    style="background:var(--wrong); color:white;">
+              <i class="bi bi-stop-fill"></i> Stop & Transcribe
+            </button>
+            <span id="teacherTimer" style="color:var(--muted); font-family:monospace;">00:00</span>
           </div>
-          <div class="result-box placeholder" id="sttResult">Transcribed text will appear here…</div>
+          
+          <!-- Status -->
+          <div id="teacherStatus" style="margin-bottom:15px; padding:12px; background:var(--surface); border:1px solid var(--border); border-radius:8px; min-height:50px;">
+            <span id="teacherStatusText">Ready to record</span>
+            <div id="teacherRecordingWave" style="display:none; margin-top:5px;">
+              <span style="display:inline-block; width:4px; height:15px; background:var(--accent2); margin-right:3px; animation: wave 0.8s infinite;"></span>
+              <span style="display:inline-block; width:4px; height:25px; background:var(--accent2); margin-right:3px; animation: wave 0.8s infinite 0.1s;"></span>
+              <span style="display:inline-block; width:4px; height:10px; background:var(--accent2); margin-right:3px; animation: wave 0.8s infinite 0.2s;"></span>
+            </div>
+          </div>
+          
+          <!-- Result -->
+          <div class="result-box" id="teacherSttResult" style="min-height:60px; display:none;"></div>
+          
+          <!-- File upload fallback (collapsible) -->
+          <details style="margin-top:15px;">
+            <summary style="color:var(--muted); cursor:pointer;">📁 Upload audio file instead</summary>
+            <div style="margin-top:10px;">
+              <label class="custom-file-label" for="teacherSttFile" style="margin-bottom:10px;">
+                <i class="bi bi-cloud-upload"></i>
+                <span id="teacherFileName">Choose audio file…</span>
+              </label>
+              <input type="file" id="teacherSttFile" accept="audio/*" style="display:none;" onchange="teacherSendFile(this)" />
+              <button class="btn-action" id="teacherFileTranscribe" onclick="teacherTranscribeFile()" style="margin-top:5px;" disabled>
+                <i class="bi bi-arrow-right-circle"></i> Transcribe File
+              </button>
+            </div>
+          </details>
         </div>
       </div>
     </div>
@@ -556,6 +586,109 @@
 <script>
   // ===================================================
   //  State
+
+  // ═══════════════════════════════════════════════
+  // STUDENT REAL-TIME RECORDING
+  // ═══════════════════════════════════════════════
+  let studentRecorder = null;
+  let studentChunks = [];
+  let studentTimer = null;
+  let studentSeconds = 0;
+
+  async function studentStartRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      studentRecorder = new MediaRecorder(stream);
+      studentChunks = [];
+      
+      studentRecorder.ondataavailable = e => studentChunks.push(e.data);
+      
+      studentRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        
+        document.getElementById('studentStatusText').textContent = 'Processing recording...';
+        
+        const audioBlob = new Blob(studentChunks, { type: 'audio/webm' });
+        await studentSendAudio(audioBlob);
+      };
+      
+      studentRecorder.start();
+      
+      // Update UI
+      document.getElementById('studentStartRecord').disabled = true;
+      document.getElementById('studentStopRecord').disabled = false;
+      document.getElementById('studentStatusText').textContent = 'Recording... Speak now';
+      document.getElementById('studentRecordingWave').style.display = 'block';
+      document.getElementById('studentSttResult').style.display = 'none';
+      
+      // Start timer
+      studentSeconds = 0;
+      updateStudentTimer();
+      studentTimer = setInterval(() => {
+        studentSeconds++;
+        updateStudentTimer();
+      }, 1000);
+      
+    } catch (err) {
+      toast('Microphone access denied or not available', 'err');
+      console.error('Recording error:', err);
+    }
+  }
+
+  function studentStopRecording() {
+    if (studentRecorder && studentRecorder.state !== 'inactive') {
+      studentRecorder.stop();
+      
+      if (studentTimer) {
+        clearInterval(studentTimer);
+        studentTimer = null;
+      }
+      
+      document.getElementById('studentStartRecord').disabled = false;
+      document.getElementById('studentStopRecord').disabled = true;
+      document.getElementById('studentStatusText').textContent = 'Processing...';
+    }
+  }
+
+  function updateStudentTimer() {
+    const minutes = Math.floor(studentSeconds / 60);
+    const seconds = studentSeconds % 60;
+    document.getElementById('studentTimer').textContent = 
+      `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  async function studentSendAudio(audioBlob) {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'recording.webm');
+    
+    document.getElementById('studentStatusText').textContent = 'Transcribing with AI...';
+    document.getElementById('studentRecordingWave').style.display = 'none';
+    
+    try {
+      const response = await fetch(`${API}/stt`, {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) throw new Error(`STT failed: ${response.status}`);
+      
+      const data = await response.json();
+      const text = data.text || data.transcript || JSON.stringify(data);
+      
+      const resultDiv = document.getElementById('studentSttResult');
+      resultDiv.textContent = `"${text}"`;
+      resultDiv.style.display = 'block';
+      
+      document.getElementById('studentStatusText').textContent = 'Ready to record';
+      toast('Voice captured successfully!', 'ok');
+      
+    } catch (err) {
+      document.getElementById('studentStatusText').textContent = 'Transcription failed';
+      toast('Failed to transcribe recording', 'err');
+      console.error('STT error:', err);
+    }
+  }
   
   let topicChart = null;
 

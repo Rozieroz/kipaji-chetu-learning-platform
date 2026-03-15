@@ -6,18 +6,18 @@ Uses Zero Data Retention (ZDR) configuration for privacy compliance.
 """
 Automated content generation service using Groq.
 Handles quiz generation, feedback, simplified explanations, and rate limit resilience.
-Zero Data Retention (ZDR) is enabled by default on Groq API.
+Includes question bank management for variety.
 """
 
 import os
 import re
 import json
+import random
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from datetime import datetime, timedelta
 from groq import AsyncGroq
 from groq import RateLimitError, APIError
-
-import random
 
 logger = logging.getLogger(__name__)
 
@@ -32,22 +32,21 @@ class AutomatedContentService:
         
         self.client = AsyncGroq(
             api_key=self.api_key,
-            # Zero Data Retention is set, no additional configuration needed for ZDR
         )
         
-        # Model selection based on task complexity and speed requirements
+        # Model selection based on task complexity
         self.models = {
-            "quiz_generation": "llama-3.3-70b-versatile",   # High quality for question creation
-            "feedback_standard": "llama-3.1-8b-instant",    # Fast enough for real-time feedback
-            "feedback_simplified": "llama-3.1-8b-instant",  # Good balance for simplification
-            "explanation_simplify": "llama-3.1-8b-instant"  # Quick responses for accessibility
+            "quiz_generation": "llama-3.3-70b-versatile",
+            "feedback_standard": "llama-3.1-8b-instant",
+            "feedback_simplified": "llama-3.1-8b-instant",
+            "explanation_simplify": "llama-3.1-8b-instant"
         }
-    
+        
+        # Track recently generated questions to avoid repetition
+        self.recent_questions = {}  # key: f"{topic}_{difficulty}", value: list of recent questions
+        
     def _extract_rate_limit_wait_time(self, error_message: str) -> str:
-        """
-        Extract wait time from rate limit error messages.
-        Pattern matches: "try again in Xm Ys"
-        """
+        """Extract wait time from rate limit error messages."""
         match = re.search(r"try again in (\d+)m(\d+\.?\d*)s", error_message)
         if match:
             minutes = match.group(1)
@@ -56,37 +55,70 @@ class AutomatedContentService:
         return "a few minutes"
     
     def _handle_api_error(self, error: Exception, operation: str) -> str:
-        """
-        Centralized error handling for API calls.
-        Returns user-friendly error message.
-        """
+        """Centralized error handling for API calls."""
         error_str = str(error)
         logger.error(f"Groq API error during {operation}: {error_str}")
         
-        # Check for rate limit (429)
         if "429" in error_str or "rate_limit_exceeded" in error_str:
             wait_time = self._extract_rate_limit_wait_time(error_str)
             return f"⚠️ Daily usage limit reached. Please try again in about {wait_time}. (Groq API rate limit)"
         
-        # Other API errors
         if isinstance(error, APIError):
             return f"Groq API error: {error_str}"
         
-        # Generic errors
         return f"Error calling Groq API: {error_str}"
     
-    async def generate_quiz_question(self, topic: str, difficulty: str) -> Dict[str, Any]:
+    async def generate_quiz_question(self, topic: str, difficulty: str, recent_questions: List[str] = None) -> Dict[str, Any]:
         """
-        Generate a multiple-choice quiz question on a given topic.
-        Returns question with 4 options, correct answer, and explanation.
-        Includes a random seed to ensure variety.
+        Generate a multiple-choice quiz question with awareness of recent questions to avoid repetition.
         """
-
-        seed = random.randint(1, 10000)
-
+        # Create a key for tracking
+        topic_key = f"{topic}_{difficulty}"
+        
+        # Initialize recent questions list if not exists
+        if topic_key not in self.recent_questions:
+            self.recent_questions[topic_key] = []
+        
+        # Get list of recent questions to avoid (from parameter or internal tracking)
+        avoid_list = recent_questions or self.recent_questions[topic_key][-5:]  # Avoid last 5
+        
+        # Random seed for variety
+        seed = random.randint(1, 1000000)
+        
+        # Question templates to rotate through
+        templates = [
+            "Create a challenging multiple-choice question about {topic}",
+            "Create an interesting real-world application question about {topic}",
+            "Create a conceptual understanding question about {topic}",
+            "Create a problem-solving question involving {topic}",
+            "Create a question that tests practical knowledge of {topic}",
+            "Create a question about a key concept in {topic}",
+            "Create a question that requires critical thinking about {topic}",
+            "Create a question about an important formula or principle in {topic}"
+        ]
+        template = templates[seed % len(templates)]
+        
+        # Difficulty-specific instructions
+        difficulty_guides = {
+            "easy": "Focus on basic concepts and straightforward applications. Keep it simple.",
+            "medium": "Include intermediate concepts that require some thought. Mix of theory and practice.",
+            "hard": "Challenge with complex scenarios, multi-step problems, or advanced concepts."
+        }
+        
+        # Build the prompt with explicit anti-repetition instructions
         prompt = f"""
-        Create a {difficulty} difficulty multiple-choice quiz question about {topic}.
-        Use a different question than usual (seed: {seed})
+        {template.format(topic=topic)} at {difficulty} difficulty level.
+        
+        {difficulty_guides.get(difficulty, '')}
+        
+        IMPORTANT RULES:
+        1. This MUST be DIFFERENT from these recent questions about {topic}:
+        {chr(10).join([f'   - {q[:100]}...' for q in avoid_list if q])}
+        
+        2. Create completely new content - different scenario, different concepts, different approach.
+        
+        3. Use seed {seed} for uniqueness.
+        
         Return in this exact JSON format:
         {{
             "question": "the question text",
@@ -95,23 +127,40 @@ class AutomatedContentService:
             "option_c": "third option",
             "option_d": "fourth option",
             "correct_answer": "A/B/C/D",
-            "explanation": "brief explanation of the correct answer"
+            "explanation": "brief explanation of the correct answer",
+            "keywords": ["keyword1", "keyword2"]  # Add 2-3 keywords about what this question covers
         }}
-        Ensure all fields are present and valid JSON.
+        
+        Ensure all options are plausible and the correct answer is clearly correct.
         """
         
         try:
             response = await self.client.chat.completions.create(
                 model=self.models["quiz_generation"],
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.9,                # the higher it isthe more random
+                temperature=0.95,
                 response_format={"type": "json_object"},
-                max_tokens=500
+                max_tokens=600
             )
             
             content = response.choices[0].message.content
             result = json.loads(content)
-            logger.info(f"Generated quiz question for {topic} at {difficulty} difficulty")
+            
+            # Extract question text for tracking
+            question_text = result.get("question", "")
+            
+            # Update recent questions list
+            self.recent_questions[topic_key].append(question_text)
+            # Keep only last 10
+            if len(self.recent_questions[topic_key]) > 10:
+                self.recent_questions[topic_key].pop(0)
+            
+            logger.info(f"Generated quiz question for {topic} at {difficulty} difficulty (seed: {seed})")
+            
+            # Add metadata
+            result["_generation_seed"] = seed
+            result["_model_used"] = self.models["quiz_generation"]
+            
             return result
             
         except json.JSONDecodeError as e:
@@ -129,10 +178,8 @@ class AutomatedContentService:
         is_correct: bool,
         simplified: bool = False
     ) -> str:
-        """
-        Generate personalized feedback for a student's answer.
-        If simplified=True, produces shorter sentences and clearer language.
-        """
+        """Generate personalized feedback for a student's answer."""
+        # (Keep this method as is from previous version)
         if is_correct:
             prompt = f"""
             The student answered correctly. Provide encouraging feedback 
@@ -179,10 +226,8 @@ class AutomatedContentService:
             return error_msg
     
     async def simplify_explanation(self, text: str) -> str:
-        """
-        Convert complex explanations into simpler language.
-        Used for students with accessibility needs.
-        """
+        """Convert complex explanations into simpler language."""
+        # (Keep this method as is from previous version)
         prompt = f"""
         Rewrite the following explanation using very simple language:
         - Use short sentences
@@ -209,10 +254,11 @@ class AutomatedContentService:
             
         except Exception as e:
             logger.error(f"Simplification failed: {e}")
-            return text  # Return original if simplification fails
+            return text
 
-# Singleton instance for reuse across the application
+# Singleton instance
 automated_service = AutomatedContentService()
+
 
 """
 has a three‑tier model mapping for different tasks.
