@@ -10,6 +10,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.endpoints import submit, progress, reports, questions, tts, stt, student, topics
 
+from fastapi.responses import RedirectResponse
+
+
 # Mount static files for frontend (if needed)
 from fastapi.staticfiles import StaticFiles
 
@@ -53,6 +56,10 @@ app.add_middleware(
 )
 
 # Include routers
+@app.get("/")
+async def root():
+    return RedirectResponse(url="/static/index.html")
+
 app.include_router(submit.router, prefix="/api", tags=["Student Actions"])
 app.include_router(progress.router, prefix="/api", tags=["Student Progress"])
 app.include_router(reports.router, prefix="/api", tags=["Teacher Reports"])
