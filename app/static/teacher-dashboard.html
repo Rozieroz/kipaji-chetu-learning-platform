@@ -586,109 +586,7 @@
 <script>
   // ===================================================
   //  State
-
-  // ═══════════════════════════════════════════════
-  // STUDENT REAL-TIME RECORDING
-  // ═══════════════════════════════════════════════
-  let studentRecorder = null;
-  let studentChunks = [];
-  let studentTimer = null;
-  let studentSeconds = 0;
-
-  async function studentStartRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      
-      studentRecorder = new MediaRecorder(stream);
-      studentChunks = [];
-      
-      studentRecorder.ondataavailable = e => studentChunks.push(e.data);
-      
-      studentRecorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        
-        document.getElementById('studentStatusText').textContent = 'Processing recording...';
-        
-        const audioBlob = new Blob(studentChunks, { type: 'audio/webm' });
-        await studentSendAudio(audioBlob);
-      };
-      
-      studentRecorder.start();
-      
-      // Update UI
-      document.getElementById('studentStartRecord').disabled = true;
-      document.getElementById('studentStopRecord').disabled = false;
-      document.getElementById('studentStatusText').textContent = 'Recording... Speak now';
-      document.getElementById('studentRecordingWave').style.display = 'block';
-      document.getElementById('studentSttResult').style.display = 'none';
-      
-      // Start timer
-      studentSeconds = 0;
-      updateStudentTimer();
-      studentTimer = setInterval(() => {
-        studentSeconds++;
-        updateStudentTimer();
-      }, 1000);
-      
-    } catch (err) {
-      toast('Microphone access denied or not available', 'err');
-      console.error('Recording error:', err);
-    }
-  }
-
-  function studentStopRecording() {
-    if (studentRecorder && studentRecorder.state !== 'inactive') {
-      studentRecorder.stop();
-      
-      if (studentTimer) {
-        clearInterval(studentTimer);
-        studentTimer = null;
-      }
-      
-      document.getElementById('studentStartRecord').disabled = false;
-      document.getElementById('studentStopRecord').disabled = true;
-      document.getElementById('studentStatusText').textContent = 'Processing...';
-    }
-  }
-
-  function updateStudentTimer() {
-    const minutes = Math.floor(studentSeconds / 60);
-    const seconds = studentSeconds % 60;
-    document.getElementById('studentTimer').textContent = 
-      `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-  }
-
-  async function studentSendAudio(audioBlob) {
-    const formData = new FormData();
-    formData.append('file', audioBlob, 'recording.webm');
-    
-    document.getElementById('studentStatusText').textContent = 'Transcribing with AI...';
-    document.getElementById('studentRecordingWave').style.display = 'none';
-    
-    try {
-      const response = await fetch(`${API}/stt`, {
-        method: 'POST',
-        body: formData
-      });
-      
-      if (!response.ok) throw new Error(`STT failed: ${response.status}`);
-      
-      const data = await response.json();
-      const text = data.text || data.transcript || JSON.stringify(data);
-      
-      const resultDiv = document.getElementById('studentSttResult');
-      resultDiv.textContent = `"${text}"`;
-      resultDiv.style.display = 'block';
-      
-      document.getElementById('studentStatusText').textContent = 'Ready to record';
-      toast('Voice captured successfully!', 'ok');
-      
-    } catch (err) {
-      document.getElementById('studentStatusText').textContent = 'Transcription failed';
-      toast('Failed to transcribe recording', 'err');
-      console.error('STT error:', err);
-    }
-  }
+  
   
   let topicChart = null;
 
@@ -841,9 +739,9 @@
     });
   }
 
-  // ================================================
-  //  Main data loader
-  
+  // ══════════════════════════════════════════════
+  // Main data loader - with correct field mapping
+  // ══════════════════════════════════════════════
   async function loadData() {
     const btn = document.getElementById('refreshBtn');
     btn.classList.add('loading');
@@ -862,19 +760,25 @@
       const res = await fetch('/api/teacher-report');
       if (!res.ok) throw new Error(`Server responded with ${res.status} ${res.statusText}`);
       const data = await res.json();
+      
+      console.log('API Response:', data); // Debug log
 
-      // Metrics
+      // Metrics - match exact field names from API
       document.getElementById('totalStudents').textContent = data.total_students ?? '—';
-      const avg = data.average_class_score ?? data.average_score ?? null;
-      document.getElementById('classAvg').textContent = avg !== null ? `${parseFloat(avg).toFixed(1)}%` : '—';
+      
+      // Handle average class score
+      const avgScore = data.average_class_score;
+      document.getElementById('classAvg').textContent = avgScore !== null ? `${parseFloat(avgScore).toFixed(1)}%` : '—';
 
-      // Tables
+      // Tables - match exact field names
       renderStruggling(data.struggling_students || []);
-      renderTopics(data.most_difficult_topics || data.difficult_topics || []);
+      
+      // Use most_difficult_topics as returned by API
+      const topics = data.most_difficult_topics || [];
+      renderTopics(topics);
 
       // Chart
-      const chartData = data.most_difficult_topics || data.difficult_topics || [];
-      if (chartData.length) renderChart(chartData);
+      if (topics.length) renderChart(topics);
 
       showToast('Data refreshed successfully');
     } catch (err) {
@@ -887,6 +791,163 @@
       btn.classList.remove('loading');
       btn.disabled = false;
     }
+  }
+
+  // ══════════════════════════════════════════════
+  // Render struggling students table - UPDATED
+  // ══════════════════════════════════════════════
+  function renderStruggling(students) {
+    const wrap = document.getElementById('strugglingTableWrap');
+    document.getElementById('strugglingCount').textContent = students.length;
+
+    if (!students.length) {
+      wrap.innerHTML = `<div class="empty-state"><i class="bi bi-emoji-smile"></i>No struggling students — great job!</div>`;
+      return;
+    }
+
+    const rows = students.map(s => {
+      // Handle different possible field names
+      const name = s.name || `${s.first_name || ''} ${s.last_name || ''}`.trim() || 'Unknown';
+      const score = s.avg_score ?? s.average_score ?? 0;
+      
+      return `
+        <tr>
+          <td>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:32px;height:32px;border-radius:50%;background:rgba(255,107,107,0.12);color:var(--accent2);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;flex-shrink:0;">
+                ${(name).charAt(0).toUpperCase()}
+              </div>
+              <span style="font-weight:500;">${escHtml(name)}</span>
+            </div>
+          </td>
+          <td>${scorePill(score)}</td>
+        </tr>`;
+    }).join('');
+
+    wrap.innerHTML = `
+      <table class="dash-table">
+        <thead><tr><th>Student</th><th>Avg Score</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  // ══════════════════════════════════════════════
+  // Render difficult topics table - UPDATED
+  // ══════════════════════════════════════════════
+  function renderTopics(topics) {
+    const wrap = document.getElementById('topicsTableWrap');
+    document.getElementById('topicsCount').textContent = topics.length;
+
+    if (!topics.length) {
+      wrap.innerHTML = `<div class="empty-state"><i class="bi bi-info-circle"></i>No topic data available.</div>`;
+      return;
+    }
+
+    const rows = topics.map((t, i) => {
+      // Handle different possible field names
+      const topicName = t.topic_name ?? t.name ?? t.topic ?? `Topic ${i+1}`;
+      const score = t.avg_score ?? t.average_score ?? 0;
+      
+      return `
+        <tr>
+          <td>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-size:0.7rem;font-weight:700;color:var(--muted);width:20px;text-align:right;">${i+1}</span>
+              <span style="font-weight:500;">${escHtml(topicName)}</span>
+            </div>
+          </td>
+          <td>${scorePill(score)}</td>
+        </tr>`;
+    }).join('');
+
+    wrap.innerHTML = `
+      <table class="dash-table">
+        <thead><tr><th>Topic</th><th>Avg Score</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  // ══════════════════════════════════════════════
+  // Score pill helper - UPDATED to handle NaN
+  // ══════════════════════════════════════════════
+  function scorePill(val) {
+    // Handle null, undefined, or NaN
+    if (val === null || val === undefined || isNaN(val)) {
+      return `<span class="score-pill score-low"><span class="dot"></span>0%</span>`;
+    }
+    
+    const pct = typeof val === 'number' ? val : parseFloat(val);
+    const cls  = pct < 50 ? 'score-low' : pct < 75 ? 'score-mid' : 'score-high';
+    return `<span class="score-pill ${cls}"><span class="dot"></span>${pct.toFixed(1)}%</span>`;
+  }
+
+  // ══════════════════════════════════════════════
+  // Render chart - UPDATED
+  // ══════════════════════════════════════════════
+  function renderChart(topics) {
+    const labels = topics.map(t => t.topic_name ?? t.name ?? t.topic ?? 'Unknown');
+    const data = topics.map(t => {
+      const score = t.avg_score ?? t.average_score ?? 0;
+      return parseFloat(score).toFixed(1);
+    });
+
+    // colour gradient by score
+    const colors = data.map(v => {
+      const n = parseFloat(v);
+      if (n < 50) return 'rgba(255,107,107,0.85)';
+      if (n < 75) return 'rgba(247,183,49,0.85)';
+      return 'rgba(56,217,169,0.85)';
+    });
+
+    if (topicChart) topicChart.destroy();
+
+    const ctx = document.getElementById('topicChart').getContext('2d');
+    topicChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Average Score (%)',
+          data,
+          backgroundColor: colors,
+          borderColor: colors.map(c => c.replace('0.85', '1')),
+          borderWidth: 0,
+          borderRadius: 6,
+          borderSkipped: false,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#1c2333',
+            borderColor: '#2a3248',
+            borderWidth: 1,
+            titleColor: '#e6ecf8',
+            bodyColor: '#7a8aaa',
+            padding: 12,
+            callbacks: {
+              label: ctx => ` ${ctx.parsed.y}%`
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { color: '#7a8aaa', font: { family: 'DM Sans', size: 12 } },
+            grid: { display: false },
+            border: { color: '#2a3248' }
+          },
+          y: {
+            min: 0, max: 100,
+            ticks: { color: '#7a8aaa', font: { family: 'DM Sans', size: 12 }, callback: v => v + '%' },
+            grid: { color: 'rgba(255,255,255,0.04)' },
+            border: { color: 'transparent' }
+          }
+        }
+      }
+    });
   }
 
   // ================================================
@@ -970,6 +1031,138 @@
     }
   }
 
+  // ═══════════════════════════════════════════════
+  // TEACHER REAL-TIME RECORDING
+  // ═══════════════════════════════════════════════
+  let teacherRecorder = null;
+  let teacherChunks = [];
+  let teacherTimer = null;
+  let teacherSeconds = 0;
+
+  async function teacherStartRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      teacherRecorder = new MediaRecorder(stream);
+      teacherChunks = [];
+      
+      teacherRecorder.ondataavailable = e => teacherChunks.push(e.data);
+      
+      teacherRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        
+        document.getElementById('teacherStatusText').textContent = 'Processing recording...';
+        document.getElementById('teacherRecordingWave').style.display = 'none';
+        
+        const audioBlob = new Blob(teacherChunks, { type: 'audio/webm' });
+        await teacherSendAudio(audioBlob);
+      };
+      
+      teacherRecorder.start();
+      
+      // Update UI
+      document.getElementById('teacherStartRecord').disabled = true;
+      document.getElementById('teacherStopRecord').disabled = false;
+      document.getElementById('teacherStatusText').textContent = 'Recording...';
+      document.getElementById('teacherRecordingWave').style.display = 'block';
+      document.getElementById('teacherSttResult').style.display = 'none';
+      
+      // Timer
+      teacherSeconds = 0;
+      updateTeacherTimer();
+      teacherTimer = setInterval(() => {
+        teacherSeconds++;
+        updateTeacherTimer();
+      }, 1000);
+      
+    } catch (err) {
+      showToast('Microphone access denied', 'error');
+      console.error('Recording error:', err);
+    }
+  }
+
+  function teacherStopRecording() {
+    if (teacherRecorder && teacherRecorder.state !== 'inactive') {
+      teacherRecorder.stop();
+      clearInterval(teacherTimer);
+      
+      document.getElementById('teacherStartRecord').disabled = false;
+      document.getElementById('teacherStopRecord').disabled = true;
+    }
+  }
+
+  function updateTeacherTimer() {
+    const mins = Math.floor(teacherSeconds / 60);
+    const secs = teacherSeconds % 60;
+    document.getElementById('teacherTimer').textContent = 
+      `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
+  }
+
+  async function teacherSendAudio(blob) {
+    const formData = new FormData();
+    formData.append('file', blob, 'recording.webm');
+    
+    document.getElementById('teacherStatusText').textContent = 'Transcribing with Groq Whisper...';
+    
+    try {
+      const res = await fetch('/api/stt', { method: 'POST', body: formData });
+      if (!res.ok) throw new Error(`STT error: ${res.status}`);
+      
+      const data = await res.json();
+      const text = data.text || data.transcript || JSON.stringify(data);
+      
+      const resultDiv = document.getElementById('teacherSttResult');
+      resultDiv.textContent = `"${text}"`;
+      resultDiv.style.display = 'block';
+      
+      document.getElementById('teacherStatusText').textContent = 'Ready';
+      showToast('Recording transcribed!', 'success');
+      
+    } catch (err) {
+      document.getElementById('teacherStatusText').textContent = 'Transcription failed';
+      showToast('STT failed', 'error');
+      console.error('STT error:', err);
+    }
+  }
+
+  // File upload functions
+  let selectedTeacherFile = null;
+
+  function teacherSendFile(input) {
+    selectedTeacherFile = input.files[0];
+    if (selectedTeacherFile) {
+      document.getElementById('teacherFileName').textContent = selectedTeacherFile.name;
+      document.getElementById('teacherFileTranscribe').disabled = false;
+    }
+  }
+
+  async function teacherTranscribeFile() {
+    if (!selectedTeacherFile) return;
+    
+    const formData = new FormData();
+    formData.append('file', selectedTeacherFile);
+    
+    document.getElementById('teacherStatusText').textContent = 'Transcribing file...';
+    
+    try {
+      const res = await fetch('/api/stt', { method: 'POST', body: formData });
+      if (!res.ok) throw new Error(`STT error: ${res.status}`);
+      
+      const data = await res.json();
+      const text = data.text || data.transcript || JSON.stringify(data);
+      
+      const resultDiv = document.getElementById('teacherSttResult');
+      resultDiv.textContent = `"${text}"`;
+      resultDiv.style.display = 'block';
+      
+      document.getElementById('teacherStatusText').textContent = 'Ready';
+      showToast('File transcribed!', 'success');
+      
+    } catch (err) {
+      document.getElementById('teacherStatusText').textContent = 'Transcription failed';
+      showToast('File transcription failed', 'error');
+    }
+  }
   // ==================================================
   //  Utility
   // 

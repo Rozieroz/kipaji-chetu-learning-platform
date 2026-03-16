@@ -497,6 +497,12 @@
           Enter your student ID to load your profile and begin your session.
           Your teacher can give you your ID if you've forgotten it.
         </p>
+        <p style="color:var(--muted);font-size:0.88rem;margin-bottom:24px;line-height:1.65;">
+          <em>
+            For demonstration, enter <strong>3 for a student without a disability</strong> or 
+            <strong>4 for a student with a disability (text-to-speech enabled)</strong>.
+          </em>
+        </p>
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
           <div style="flex:1;min-width:140px;max-width:220px;">
             <label class="kc-label" for="inputStudentId">Student ID</label>
@@ -669,509 +675,613 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
-/* ===============================================================
-   CONFIG & STATE
-=============================================================== */
-const API = '/api';
+  /* ===============================================================
+    CONFIG & STATE
+  =============================================================== */
+  const API = '/api';
 
-// Hardcoded topic list – overwritten if GET /api/topics succeeds
-const FALLBACK_TOPICS = [
-  { id:1,  name:'Mathematics',  icon:'bi-calculator'     },
-  { id:2,  name:'Science',      icon:'bi-flask'          },
-  { id:3,  name:'English',      icon:'bi-book'           },
-  { id:4,  name:'History',      icon:'bi-hourglass-split'},
-  { id:5,  name:'Geography',    icon:'bi-globe'          },
-  { id:6,  name:'Technology',   icon:'bi-cpu'            },
-  { id:7,  name:'Biology',      icon:'bi-heart-pulse'    },
-  { id:8,  name:'Chemistry',    icon:'bi-atom'           },
-];
+  // Hardcoded topic list – overwritten if GET /api/topics succeeds
+  const FALLBACK_TOPICS = [
+    { id:1,  name:'Mathematics',  icon:'bi-calculator'     },
+    { id:2,  name:'Science',      icon:'bi-flask'          },
+    { id:3,  name:'English',      icon:'bi-book'           },
+    { id:4,  name:'History',      icon:'bi-hourglass-split'},
+    { id:5,  name:'Geography',    icon:'bi-globe'          },
+    { id:6,  name:'Technology',   icon:'bi-cpu'            },
+    { id:7,  name:'Biology',      icon:'bi-heart-pulse'    },
+    { id:8,  name:'Chemistry',    icon:'bi-atom'           },
+  ];
 
-const state = {
-  student:       null,
-  topicId:       null,
-  topicName:     '',
-  question:      null,
-  selectedIdx:   null,
-  answered:      false,
-  session:       { correct:0, answered:0 },
-};
-
-let ttsAudioURL = null;
-
-/* ==========================================
-   UTILITIES
-========================================== */
-function esc(s) {
-  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-function toast(msg, type='') {
-  const c = document.getElementById('kc-toasts');
-  const t = document.createElement('div');
-  t.className = 'kc-toast ' + type;
-  const ico = type==='ok' ? 'check-circle-fill' : type==='err' ? 'x-circle-fill' : 'info-circle';
-  t.innerHTML = `<i class="bi bi-${ico}"></i> ${msg}`;
-  c.appendChild(t);
-  setTimeout(()=>{ t.style.cssText='opacity:0;transition:opacity .4s'; setTimeout(()=>t.remove(),400); }, 3400);
-}
-
-function showSection(id) {
-  document.querySelectorAll('.kc-section').forEach(s=>s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-  window.scrollTo({top:0, behavior:'smooth'});
-}
-
-function setStep(n) {
-  for (let i=1;i<=4;i++) {
-    const dot  = document.getElementById(`stepDot${i}`);
-    const item = document.getElementById(`stepItem${i}`);
-    dot.classList.remove('active','done');
-    item.classList.remove('active','done');
-    if (i<n) {
-      dot.classList.add('done');  item.classList.add('done');
-      dot.innerHTML = '<i class="bi bi-check2"></i>';
-    } else if (i===n) {
-      dot.classList.add('active'); item.classList.add('active');
-      dot.textContent = String(i);
-    } else {
-      dot.innerHTML = i<4 ? String(i) : '<i class="bi bi-check2"></i>';
-    }
-  }
-}
-
-function setBtnLoading(id, on, restoreHtml) {
-  const b = document.getElementById(id);
-  if (!b) return;
-  b.disabled = on;
-  if (on) {
-    b.dataset.orig = b.innerHTML;
-    b.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Loading…';
-  } else if (restoreHtml) {
-    b.innerHTML = b.dataset.orig || restoreHtml;
-  }
-}
-
-/* ===============================================================
-   STEP 1 — STUDENT LOOKUP
-=============================================================== */
-async function lookupStudent() {
-  const val = document.getElementById('inputStudentId').value.trim();
-  const errEl = document.getElementById('loginErr');
-  errEl.style.display = 'none';
-
-  if (!val || isNaN(val) || parseInt(val)<1) {
-    errEl.innerHTML = '<i class="bi bi-exclamation-circle"></i> Please enter a valid numeric student ID.';
-    errEl.style.display = 'flex';
-    document.getElementById('inputStudentId').classList.add('err-state');
-    return;
-  }
-  document.getElementById('inputStudentId').classList.remove('err-state');
-
-  setBtnLoading('btnLookup', true);
-  try {
-    const res = await fetch(`${API}/students/${val}`);
-    if (res.status===404) throw new Error('No student found with that ID. Please check with your teacher.');
-    if (!res.ok) throw new Error(`Server error (${res.status}). Please try again later.`);
-    const data = await res.json();
-    state.student = data;
-    renderProfile();
-    await buildTopicGrid();
-    showSection('secTopic');
-    setStep(2);
-    toast(`Welcome, ${esc(data.first_name)}! 🎉`, 'ok');
-  } catch(err) {
-    errEl.innerHTML = `<i class="bi bi-exclamation-circle"></i> ${esc(err.message)}`;
-    errEl.style.display = 'flex';
-  } finally {
-    setBtnLoading('btnLookup', false, '<i class="bi bi-search"></i> Find Me');
-  }
-}
-
-/* ===============================================================
-   PROFILE BANNER
-=============================================================== */
-function renderProfile() {
-  const s = state.student;
-  const initials = ((s.first_name||'')[0]||'') + ((s.last_name||'')[0]||'');
-  const modeClass = s.learning_mode==='simplified' ? 'simplified' : 'normal';
-  const modeLabel = s.learning_mode==='simplified' ? 'Simplified Mode' : 'Standard Mode';
-  const risk = parseFloat(s.risk_score||0);
-
-  let badges = `<span class="mbadge ${modeClass}">
-    <i class="bi bi-${s.learning_mode==='simplified'?'stars':'lightning-charge'}"></i> ${modeLabel}
-  </span>`;
-  if (s.accessibility_enabled) {
-    badges += `<span class="mbadge tts-on"><i class="bi bi-ear-fill"></i> Auto-TTS On</span>`;
-  }
-  if (risk>=0.6) {
-    badges += `<span class="mbadge at-risk"><i class="bi bi-flag-fill"></i> Flagged for Support</span>`;
-  }
-
-  const el = document.getElementById('profileBanner');
-  el.innerHTML = `
-    <div class="profile-avatar">${esc(initials.toUpperCase())}</div>
-    <div class="profile-info">
-      <div class="p-name">${esc(s.first_name)} ${esc(s.last_name)}</div>
-      <div class="p-meta">
-        <span>ID #${s.id} &middot; ${esc(s.email)}</span>
-        ${badges}
-      </div>
-    </div>`;
-  el.style.display = 'flex';
-}
-
-/* ===============================================================
-   STEP 2 — TOPIC GRID
-=============================================================== */
-async function buildTopicGrid() {
-  const grid = document.getElementById('topicGrid');
-  grid.innerHTML = '';
-  state.topicId = null;
-  state.topicName = '';
-  document.getElementById('btnStart').disabled = true;
-
-  let topics = FALLBACK_TOPICS;
-  try {
-    const res = await fetch(`${API}/topics`);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length) {
-        topics = data.map((t,i) => ({
-          id:   t.id ?? t.topic_id ?? i+1,
-          name: t.name ?? t.topic_name ?? t.topic ?? `Topic ${i+1}`,
-          icon: FALLBACK_TOPICS[i%FALLBACK_TOPICS.length]?.icon ?? 'bi-bookmark',
-        }));
-      }
-    }
-  } catch(_) { /* use fallback silently */ }
-
-  topics.forEach(topic => {
-    const div = document.createElement('div');
-    div.className = 'topic-pill';
-    div.innerHTML = `
-      <div class="tp-icon"><i class="bi ${esc(topic.icon)}"></i></div>
-      <div class="tp-name">${esc(topic.name)}</div>`;
-    div.addEventListener('click', () => {
-      document.querySelectorAll('.topic-pill').forEach(p=>p.classList.remove('selected'));
-      div.classList.add('selected');
-      state.topicId   = topic.id;
-      state.topicName = topic.name;
-      document.getElementById('btnStart').disabled = false;
-    });
-    grid.appendChild(div);
-  });
-}
-
-async function startSession() {
-  if (!state.topicId) return;
-  state.session = { correct:0, answered:0 };
-  updateSessionBar();
-  showSection('secQuestion');
-  setStep(3);
-  await loadNextQuestion();
-}
-
-/* ===============================================================
-   STEP 3 — LOAD QUESTION
-=============================================================== */
-async function loadNextQuestion() {
-  state.question    = null;
-  state.selectedIdx = null;
-  state.answered    = false;
-
-  // Reset UI
-  document.getElementById('qText').textContent           = 'Loading question…';
-  document.getElementById('optionsList').innerHTML       = skeletonOptions();
-  document.getElementById('feedbackBlock').style.display = 'none';
-  document.getElementById('btnSubmit').style.display     = 'inline-flex';
-  document.getElementById('btnSubmit').disabled          = true;
-  document.getElementById('btnNext').style.display       = 'none';
-  document.getElementById('sttBlock').style.display      = 'none';
-  document.getElementById('qErr').style.display          = 'none';
-  document.getElementById('btnTtsQuestion').style.display= 'none';
-  document.getElementById('qTopicLabel').textContent     = state.topicName;
-
-  try {
-    const res = await fetch(`${API}/next-question/${state.student.id}/${state.topicId}`);
-    if (!res.ok) throw new Error(`Could not load question (${res.status}).`);
-    const data = await res.json();
-    state.question = data;
-    renderQuestion(data);
-    setStep(3);
-    if (state.student?.accessibility_enabled) {
-      setTimeout(speakQuestion, 700);
-    }
-  } catch(err) {
-    document.getElementById('qErr').innerHTML = `<i class="bi bi-exclamation-circle"></i> ${esc(err.message)}`;
-    document.getElementById('qErr').style.display = 'flex';
-    document.getElementById('qText').textContent  = 'Could not load question.';
-    document.getElementById('optionsList').innerHTML = '';
-  }
-}
-
-function skeletonOptions() {
-  return ['A','B','C','D'].map(l=>`
-    <div class="opt-btn" style="cursor:default;">
-      <div class="opt-letter">${l}</div>
-      <div class="opt-text"><span class="skel" style="width:55%;height:14px;"></span></div>
-    </div>`).join('');
-}
-
-function renderQuestion(data) {
-  const txt = data.question ?? data.question_text ?? data.text ?? '(no question)';
-  // Try to get options from either 'options' array or individual fields
-  let options = data.options ?? data.choices ?? [];
-  if (options.length === 0) {
-    // Build options from option_a, option_b, etc.
-    options = [
-      data.option_a,
-      data.option_b,
-      data.option_c,
-      data.option_d
-    ].filter(opt => opt != null);
-  }
-  document.getElementById('qText').textContent = txt;
-  document.getElementById('btnTtsQuestion').style.display = 'inline-flex';
-
-  const letters = ['A','B','C','D','E','F'];
-  const list    = document.getElementById('optionsList');
-  list.innerHTML = '';
-
-  options.forEach((opt,i) => {
-    const text = typeof opt==='string' ? opt : opt.text ?? opt.option ?? JSON.stringify(opt);
-    const btn  = document.createElement('button');
-    btn.className      = 'opt-btn';
-    btn.dataset.index  = i;
-    btn.innerHTML = `
-      <div class="opt-letter">${letters[i]??i+1}</div>
-      <div class="opt-text">${esc(text)}</div>
-      <i class="bi opt-icon"></i>`;
-    btn.addEventListener('click', () => selectOption(i));
-    list.appendChild(btn);
-  });
-}
-
-function selectOption(idx) {
-  if (state.answered) return;
-  state.selectedIdx = idx;
-  document.querySelectorAll('.opt-btn').forEach((b,i) => {
-    b.classList.toggle('selected', i===idx);
-  });
-  document.getElementById('btnSubmit').disabled = false;
-}
-
-/* ===============================================================
-   SUBMIT ANSWER
-=============================================================== */
-async function submitAnswer() {
-  if (state.selectedIdx === null || state.answered) return;
-
-  const data = state.question;
-
-  // Get the selected button and its letter
-  const selectedButton = document.querySelector('.opt-btn.selected');
-  if (!selectedButton) {
-    toast('No answer selected', 'err');
-    return;
-  }
-  const letterEl = selectedButton.querySelector('.opt-letter');
-  const letter = letterEl ? letterEl.textContent : null;
-  if (!letter || !['A', 'B', 'C', 'D'].includes(letter)) {
-    toast('Invalid answer selection', 'err');
-    return;
-  }
-
-  const payload = {
-    student_id: state.student.id,
-    question_id: data.id ?? data.question_id,
-    topic_id: state.topicId,           // t
-    answer: letter,               // send the letter directly
-    answer_index: state.selectedIdx, // keep for backward compatibility
+  const state = {
+    student:       null,
+    topicId:       null,
+    topicName:     '',
+    question:      null,
+    selectedIdx:   null,
+    answered:      false,
+    session:       { correct:0, answered:0 },
   };
 
-  setBtnLoading('btnSubmit', true);
-  document.getElementById('qErr').style.display = 'none';
+  let ttsAudioURL = null;
 
-  try {
-    const res = await fetch(`${API}/submit-answer`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+  /* ==========================================
+    UTILITIES
+  ========================================== */
+  function esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function toast(msg, type='') {
+    const c = document.getElementById('kc-toasts');
+    const t = document.createElement('div');
+    t.className = 'kc-toast ' + type;
+    const ico = type==='ok' ? 'check-circle-fill' : type==='err' ? 'x-circle-fill' : 'info-circle';
+    t.innerHTML = `<i class="bi bi-${ico}"></i> ${msg}`;
+    c.appendChild(t);
+    setTimeout(()=>{ t.style.cssText='opacity:0;transition:opacity .4s'; setTimeout(()=>t.remove(),400); }, 3400);
+  }
+
+  function showSection(id) {
+    document.querySelectorAll('.kc-section').forEach(s=>s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    window.scrollTo({top:0, behavior:'smooth'});
+  }
+
+  function setStep(n) {
+    for (let i=1;i<=4;i++) {
+      const dot  = document.getElementById(`stepDot${i}`);
+      const item = document.getElementById(`stepItem${i}`);
+      dot.classList.remove('active','done');
+      item.classList.remove('active','done');
+      if (i<n) {
+        dot.classList.add('done');  item.classList.add('done');
+        dot.innerHTML = '<i class="bi bi-check2"></i>';
+      } else if (i===n) {
+        dot.classList.add('active'); item.classList.add('active');
+        dot.textContent = String(i);
+      } else {
+        dot.innerHTML = i<4 ? String(i) : '<i class="bi bi-check2"></i>';
+      }
+    }
+  }
+
+  function setBtnLoading(id, on, restoreHtml) {
+    const b = document.getElementById(id);
+    if (!b) return;
+    b.disabled = on;
+    if (on) {
+      b.dataset.orig = b.innerHTML;
+      b.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Loading…';
+    } else if (restoreHtml) {
+      b.innerHTML = b.dataset.orig || restoreHtml;
+    }
+  }
+
+  /* ===============================================================
+    STEP 1 — STUDENT LOOKUP
+  =============================================================== */
+  async function lookupStudent() {
+    const val = document.getElementById('inputStudentId').value.trim();
+    const errEl = document.getElementById('loginErr');
+    errEl.style.display = 'none';
+
+    if (!val || isNaN(val) || parseInt(val)<1) {
+      errEl.innerHTML = '<i class="bi bi-exclamation-circle"></i> Please enter a valid numeric student ID.';
+      errEl.style.display = 'flex';
+      document.getElementById('inputStudentId').classList.add('err-state');
+      return;
+    }
+    document.getElementById('inputStudentId').classList.remove('err-state');
+
+    setBtnLoading('btnLookup', true);
+    try {
+      const res = await fetch(`${API}/students/${val}`);
+      if (res.status===404) throw new Error('No student found with that ID. Please check with your teacher.');
+      if (!res.ok) throw new Error(`Server error (${res.status}). Please try again later.`);
+      const data = await res.json();
+      state.student = data;
+      renderProfile();
+      await buildTopicGrid();
+      showSection('secTopic');
+      setStep(2);
+      toast(`Welcome, ${esc(data.first_name)}! 🎉`, 'ok');
+    } catch(err) {
+      errEl.innerHTML = `<i class="bi bi-exclamation-circle"></i> ${esc(err.message)}`;
+      errEl.style.display = 'flex';
+    } finally {
+      setBtnLoading('btnLookup', false, '<i class="bi bi-search"></i> Find Me');
+    }
+  }
+
+  /* ===============================================================
+    PROFILE BANNER
+  =============================================================== */
+  function renderProfile() {
+    const s = state.student;
+    const initials = ((s.first_name||'')[0]||'') + ((s.last_name||'')[0]||'');
+    const modeClass = s.learning_mode==='simplified' ? 'simplified' : 'normal';
+    const modeLabel = s.learning_mode==='simplified' ? 'Simplified Mode' : 'Standard Mode';
+    const risk = parseFloat(s.risk_score||0);
+
+    let badges = `<span class="mbadge ${modeClass}">
+      <i class="bi bi-${s.learning_mode==='simplified'?'stars':'lightning-charge'}"></i> ${modeLabel}
+    </span>`;
+    if (s.accessibility_enabled) {
+      badges += `<span class="mbadge tts-on"><i class="bi bi-ear-fill"></i> Auto-TTS On</span>`;
+    }
+    if (risk>=0.6) {
+      badges += `<span class="mbadge at-risk"><i class="bi bi-flag-fill"></i> Flagged for Support</span>`;
+    }
+
+    const el = document.getElementById('profileBanner');
+    el.innerHTML = `
+      <div class="profile-avatar">${esc(initials.toUpperCase())}</div>
+      <div class="profile-info">
+        <div class="p-name">${esc(s.first_name)} ${esc(s.last_name)}</div>
+        <div class="p-meta">
+          <span>ID #${s.id} &middot; ${esc(s.email)}</span>
+          ${badges}
+        </div>
+      </div>`;
+    el.style.display = 'flex';
+  }
+
+  /* ===============================================================
+    STEP 2 — TOPIC GRID
+  =============================================================== */
+  async function buildTopicGrid() {
+    const grid = document.getElementById('topicGrid');
+    grid.innerHTML = '';
+    state.topicId = null;
+    state.topicName = '';
+    document.getElementById('btnStart').disabled = true;
+
+    let topics = FALLBACK_TOPICS;
+    try {
+      const res = await fetch(`${API}/topics`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length) {
+          topics = data.map((t,i) => ({
+            id:   t.id ?? t.topic_id ?? i+1,
+            name: t.name ?? t.topic_name ?? t.topic ?? `Topic ${i+1}`,
+            icon: FALLBACK_TOPICS[i%FALLBACK_TOPICS.length]?.icon ?? 'bi-bookmark',
+          }));
+        }
+      }
+    } catch(_) { /* use fallback silently */ }
+
+    topics.forEach(topic => {
+      const div = document.createElement('div');
+      div.className = 'topic-pill';
+      div.innerHTML = `
+        <div class="tp-icon"><i class="bi ${esc(topic.icon)}"></i></div>
+        <div class="tp-name">${esc(topic.name)}</div>`;
+      div.addEventListener('click', () => {
+        document.querySelectorAll('.topic-pill').forEach(p=>p.classList.remove('selected'));
+        div.classList.add('selected');
+        state.topicId   = topic.id;
+        state.topicName = topic.name;
+        document.getElementById('btnStart').disabled = false;
+      });
+      grid.appendChild(div);
     });
-    if (!res.ok) throw new Error(`Submit failed (${res.status}).`);
-    const result = await res.json();
+  }
 
-    state.answered = true;
-    state.session.answered++;
-    const correct = result.correct ?? result.is_correct ?? false;
-    if (correct) state.session.correct++;
+  async function startSession() {
+    if (!state.topicId) return;
+    state.session = { correct:0, answered:0 };
     updateSessionBar();
-
-    markOptions(result);
-    showFeedback(result, correct);
-    setStep(4);
-
-    document.getElementById('btnSubmit').style.display = 'none';
-    document.getElementById('btnNext').style.display = 'inline-flex';
-    document.getElementById('sttBlock').style.display = 'block';
-
-    toast(correct ? '✓ Correct! Well done.' : '✗ Not quite — check the feedback.', correct ? 'ok' : 'err');
-
-    if (state.student?.accessibility_enabled) {
-      const fbText = result.feedback ?? result.explanation ?? '';
-      if (fbText) setTimeout(() => speakRaw(fbText), 900);
-    }
-  } catch (err) {
-    document.getElementById('qErr').innerHTML = `<i class="bi bi-exclamation-circle"></i> ${esc(err.message)}`;
-    document.getElementById('qErr').style.display = 'flex';
-    setBtnLoading('btnSubmit', false, '<i class="bi bi-check-lg"></i> Submit Answer');
+    showSection('secQuestion');
+    setStep(3);
+    await loadNextQuestion();
   }
-}
 
-function markOptions(result) {
-  const correctIdx = result.correct_index ?? result.correct_answer_index ?? null;
-  const correctVal = result.correct_answer ?? result.correct_option ?? null;
-  const options    = state.question?.options ?? state.question?.choices ?? [];
+  /* ===============================================================
+    STEP 3 — LOAD QUESTION
+  =============================================================== */
+  async function loadNextQuestion() {
+    state.question    = null;
+    state.selectedIdx = null;
+    state.answered    = false;
 
-  document.querySelectorAll('.opt-btn').forEach((btn,i) => {
-    btn.disabled = true;
-    const icon = btn.querySelector('.opt-icon');
-    let isCorrect = false;
-    if (correctIdx!==null)      isCorrect = (i===correctIdx);
-    else if (correctVal!==null) {
-      const t = typeof options[i]==='string' ? options[i] : options[i]?.text ?? '';
-      isCorrect = t===correctVal;
+    // Reset UI
+    document.getElementById('qText').textContent           = 'Loading question…';
+    document.getElementById('optionsList').innerHTML       = skeletonOptions();
+    document.getElementById('feedbackBlock').style.display = 'none';
+    document.getElementById('btnSubmit').style.display     = 'inline-flex';
+    document.getElementById('btnSubmit').disabled          = true;
+    document.getElementById('btnNext').style.display       = 'none';
+    document.getElementById('sttBlock').style.display      = 'none';
+    document.getElementById('qErr').style.display          = 'none';
+    document.getElementById('btnTtsQuestion').style.display= 'none';
+    document.getElementById('qTopicLabel').textContent     = state.topicName;
+
+    try {
+      const res = await fetch(`${API}/next-question/${state.student.id}/${state.topicId}`);
+      if (!res.ok) throw new Error(`Could not load question (${res.status}).`);
+      const data = await res.json();
+      state.question = data;
+      renderQuestion(data);
+      setStep(3);
+      if (state.student?.accessibility_enabled) {
+        setTimeout(speakQuestion, 700);
+      }
+    } catch(err) {
+      document.getElementById('qErr').innerHTML = `<i class="bi bi-exclamation-circle"></i> ${esc(err.message)}`;
+      document.getElementById('qErr').style.display = 'flex';
+      document.getElementById('qText').textContent  = 'Could not load question.';
+      document.getElementById('optionsList').innerHTML = '';
+    }
+  }
+
+  function skeletonOptions() {
+    return ['A','B','C','D'].map(l=>`
+      <div class="opt-btn" style="cursor:default;">
+        <div class="opt-letter">${l}</div>
+        <div class="opt-text"><span class="skel" style="width:55%;height:14px;"></span></div>
+      </div>`).join('');
+  }
+
+  function renderQuestion(data) {
+    const txt = data.question ?? data.question_text ?? data.text ?? '(no question)';
+    // Try to get options from either 'options' array or individual fields
+    let options = data.options ?? data.choices ?? [];
+    if (options.length === 0) {
+      // Build options from option_a, option_b, etc.
+      options = [
+        data.option_a,
+        data.option_b,
+        data.option_c,
+        data.option_d
+      ].filter(opt => opt != null);
+    }
+    document.getElementById('qText').textContent = txt;
+    document.getElementById('btnTtsQuestion').style.display = 'inline-flex';
+
+    const letters = ['A','B','C','D','E','F'];
+    const list    = document.getElementById('optionsList');
+    list.innerHTML = '';
+
+    options.forEach((opt,i) => {
+      const text = typeof opt==='string' ? opt : opt.text ?? opt.option ?? JSON.stringify(opt);
+      const btn  = document.createElement('button');
+      btn.className      = 'opt-btn';
+      btn.dataset.index  = i;
+      btn.innerHTML = `
+        <div class="opt-letter">${letters[i]??i+1}</div>
+        <div class="opt-text">${esc(text)}</div>
+        <i class="bi opt-icon"></i>`;
+      btn.addEventListener('click', () => selectOption(i));
+      list.appendChild(btn);
+    });
+  }
+
+  function selectOption(idx) {
+    if (state.answered) return;
+    state.selectedIdx = idx;
+    document.querySelectorAll('.opt-btn').forEach((b,i) => {
+      b.classList.toggle('selected', i===idx);
+    });
+    document.getElementById('btnSubmit').disabled = false;
+  }
+
+  /* ===============================================================
+    SUBMIT ANSWER
+  =============================================================== */
+  async function submitAnswer() {
+    if (state.selectedIdx === null || state.answered) return;
+
+    const data = state.question;
+
+    // Get the selected button and its letter
+    const selectedButton = document.querySelector('.opt-btn.selected');
+    if (!selectedButton) {
+      toast('No answer selected', 'err');
+      return;
+    }
+    const letterEl = selectedButton.querySelector('.opt-letter');
+    const letter = letterEl ? letterEl.textContent : null;
+    if (!letter || !['A', 'B', 'C', 'D'].includes(letter)) {
+      toast('Invalid answer selection', 'err');
+      return;
     }
 
-    btn.classList.remove('selected');
-    if (isCorrect) {
-      btn.classList.add('correct');
-      if (icon) icon.className='bi bi-check-circle-fill opt-icon';
-    } else if (i===state.selectedIdx) {
-      btn.classList.add('wrong');
-      if (icon) icon.className='bi bi-x-circle-fill opt-icon';
+    const payload = {
+      student_id: state.student.id,
+      question_id: data.id ?? data.question_id,
+      topic_id: state.topicId,           // t
+      answer: letter,               // send the letter directly
+      answer_index: state.selectedIdx, // keep for backward compatibility
+    };
+
+    setBtnLoading('btnSubmit', true);
+    document.getElementById('qErr').style.display = 'none';
+
+    try {
+      const res = await fetch(`${API}/submit-answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`Submit failed (${res.status}).`);
+      const result = await res.json();
+
+      state.answered = true;
+      state.session.answered++;
+      const correct = result.correct ?? result.is_correct ?? false;
+      if (correct) state.session.correct++;
+      updateSessionBar();
+
+      markOptions(result);
+      showFeedback(result, correct);
+      setStep(4);
+
+      document.getElementById('btnSubmit').style.display = 'none';
+      document.getElementById('btnNext').style.display = 'inline-flex';
+      document.getElementById('sttBlock').style.display = 'block';
+
+      toast(correct ? '✓ Correct! Well done.' : '✗ Not quite — check the feedback.', correct ? 'ok' : 'err');
+
+      if (state.student?.accessibility_enabled) {
+        const fbText = result.feedback ?? result.explanation ?? '';
+        if (fbText) setTimeout(() => speakRaw(fbText), 900);
+      }
+    } catch (err) {
+      document.getElementById('qErr').innerHTML = `<i class="bi bi-exclamation-circle"></i> ${esc(err.message)}`;
+      document.getElementById('qErr').style.display = 'flex';
+      setBtnLoading('btnSubmit', false, '<i class="bi bi-check-lg"></i> Submit Answer');
     }
+  }
+
+  function markOptions(result) {
+    const correctIdx = result.correct_index ?? result.correct_answer_index ?? null;
+    const correctVal = result.correct_answer ?? result.correct_option ?? null;
+    const options    = state.question?.options ?? state.question?.choices ?? [];
+
+    document.querySelectorAll('.opt-btn').forEach((btn,i) => {
+      btn.disabled = true;
+      const icon = btn.querySelector('.opt-icon');
+      let isCorrect = false;
+      if (correctIdx!==null)      isCorrect = (i===correctIdx);
+      else if (correctVal!==null) {
+        const t = typeof options[i]==='string' ? options[i] : options[i]?.text ?? '';
+        isCorrect = t===correctVal;
+      }
+
+      btn.classList.remove('selected');
+      if (isCorrect) {
+        btn.classList.add('correct');
+        if (icon) icon.className='bi bi-check-circle-fill opt-icon';
+      } else if (i===state.selectedIdx) {
+        btn.classList.add('wrong');
+        if (icon) icon.className='bi bi-x-circle-fill opt-icon';
+      }
+    });
+  }
+
+  function showFeedback(result, correct) {
+    const fb   = result.feedback ?? result.explanation ?? result.message ?? '';
+    const block = document.getElementById('feedbackBlock');
+    block.innerHTML = `
+      <div class="feedback-card ${correct?'correct-fb':'wrong-fb'}">
+        <div class="fb-head">
+          <i class="bi bi-${correct?'patch-check-fill':'info-circle-fill'}" style="font-size:1.1rem;"></i>
+          <span class="fb-title">${correct ? 'Excellent work!' : 'Here\'s what to know'}</span>
+          <button class="btn-tts ms-auto" onclick="speakRaw(${JSON.stringify(fb)})" title="Listen to feedback">
+            <i class="bi bi-volume-up-fill"></i> Listen
+          </button>
+        </div>
+        <div class="fb-body">${fb ? esc(fb) : '<em style="opacity:.6">No written feedback provided.</em>'}</div>
+      </div>`;
+    block.style.display = 'block';
+  }
+
+  /* ===============================================================
+    SESSION PROGRESS BAR
+  =============================================================== */
+  function updateSessionBar() {
+    const { correct, answered } = state.session;
+    document.getElementById('sbCorrect').textContent  = correct;
+    document.getElementById('sbAnswered').textContent = answered;
+    const pct = answered>0 ? Math.round((correct/answered)*100) : 0;
+    document.getElementById('sbBarFill').style.width  = pct+'%';
+  }
+
+  /* ===============================================================
+    TTS — Edge TTS via /api/tts
+  =============================================================== */
+  async function speakQuestion() {
+    const txt = state.question?.question ?? state.question?.question_text ?? '';
+    if (txt.trim()) await speakRaw(txt);
+  }
+
+  async function speakRaw(text) {
+    if (!text?.trim()) return;
+    const audio = document.getElementById('ttsAudio');
+    document.querySelectorAll('.btn-tts').forEach(b=>{ b.classList.add('playing'); b.disabled=true; });
+
+    try {
+      const res = await fetch(`${API}/tts?text=${encodeURIComponent(text)}`);
+      if (!res.ok) throw new Error(`TTS error (${res.status})`);
+      const blob = await res.blob();
+      if (ttsAudioURL) URL.revokeObjectURL(ttsAudioURL);
+      ttsAudioURL = URL.createObjectURL(blob);
+      audio.src   = ttsAudioURL;
+      await audio.play();
+    } catch(err) {
+      toast('Could not play audio: ' + err.message, 'err');
+    } finally {
+      document.querySelectorAll('.btn-tts').forEach(b=>{ b.classList.remove('playing'); b.disabled=false; });
+    }
+  }
+
+  /* ===============================================================
+    STT — Groq Whisper via /api/stt
+  =============================================================== */
+  async function sendSttFile(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const resultEl = document.getElementById('sttMiniResult');
+    const btnEl    = document.getElementById('sttUploadBtn');
+    resultEl.textContent = 'Transcribing with Groq Whisper…';
+    resultEl.style.color = 'var(--ink)';
+    resultEl.style.fontStyle = 'italic';
+    btnEl.style.opacity = '0.6';
+
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch(`${API}/stt`, { method:'POST', body:fd });
+      if (!res.ok) throw new Error(`STT error (${res.status})`);
+      const data = await res.json();
+      const text = data.text ?? data.transcript ?? JSON.stringify(data);
+      resultEl.textContent = `"${text}"`;
+      resultEl.style.fontStyle = 'normal';
+      toast('Voice captured!', 'ok');
+    } catch(err) {
+      resultEl.textContent = 'Error: ' + err.message;
+      resultEl.style.color = 'var(--wrong)';
+      toast('Voice input failed', 'err');
+    } finally {
+      btnEl.style.opacity = '1';
+      input.value = '';
+    }
+  }
+
+  // ═══════════════════════════════════════════════
+  // STUDENT REAL-TIME RECORDING
+  // ═══════════════════════════════════════════════
+  let studentRecorder = null;
+  let studentChunks = [];
+  let studentTimer = null;
+  let studentSeconds = 0;
+
+  async function studentStartRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      studentRecorder = new MediaRecorder(stream);
+      studentChunks = [];
+      
+      studentRecorder.ondataavailable = e => studentChunks.push(e.data);
+      
+      studentRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        
+        document.getElementById('studentStatusText').textContent = 'Processing recording...';
+        
+        const audioBlob = new Blob(studentChunks, { type: 'audio/webm' });
+        await studentSendAudio(audioBlob);
+      };
+      
+      studentRecorder.start();
+      
+      // Update UI
+      document.getElementById('studentStartRecord').disabled = true;
+      document.getElementById('studentStopRecord').disabled = false;
+      document.getElementById('studentStatusText').textContent = 'Recording... Speak now';
+      document.getElementById('studentRecordingWave').style.display = 'block';
+      document.getElementById('studentSttResult').style.display = 'none';
+      
+      // Start timer
+      studentSeconds = 0;
+      updateStudentTimer();
+      studentTimer = setInterval(() => {
+        studentSeconds++;
+        updateStudentTimer();
+      }, 1000);
+      
+    } catch (err) {
+      toast('Microphone access denied or not available', 'err');
+      console.error('Recording error:', err);
+    }
+  }
+
+  function studentStopRecording() {
+    if (studentRecorder && studentRecorder.state !== 'inactive') {
+      studentRecorder.stop();
+      
+      if (studentTimer) {
+        clearInterval(studentTimer);
+        studentTimer = null;
+      }
+      
+      document.getElementById('studentStartRecord').disabled = false;
+      document.getElementById('studentStopRecord').disabled = true;
+      document.getElementById('studentStatusText').textContent = 'Processing...';
+    }
+  }
+
+  function updateStudentTimer() {
+    const minutes = Math.floor(studentSeconds / 60);
+    const seconds = studentSeconds % 60;
+    document.getElementById('studentTimer').textContent = 
+      `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  async function studentSendAudio(audioBlob) {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'recording.webm');
+    
+    document.getElementById('studentStatusText').textContent = 'Transcribing with AI...';
+    document.getElementById('studentRecordingWave').style.display = 'none';
+    
+    try {
+      const response = await fetch(`${API}/stt`, {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) throw new Error(`STT failed: ${response.status}`);
+      
+      const data = await response.json();
+      const text = data.text || data.transcript || JSON.stringify(data);
+      
+      const resultDiv = document.getElementById('studentSttResult');
+      resultDiv.textContent = `"${text}"`;
+      resultDiv.style.display = 'block';
+      
+      document.getElementById('studentStatusText').textContent = 'Ready to record';
+      toast('Voice captured successfully!', 'ok');
+      
+    } catch (err) {
+      document.getElementById('studentStatusText').textContent = 'Transcription failed';
+      toast('Failed to transcribe recording', 'err');
+      console.error('STT error:', err);
+    }
+  }
+
+  /* ===============================================================
+    NAVIGATION
+  =============================================================== */
+  function resetToLogin() {
+    state.student = null;
+    state.topicId = null;
+    document.getElementById('profileBanner').style.display = 'none';
+    document.getElementById('loginErr').style.display      = 'none';
+    document.getElementById('inputStudentId').value        = '';
+    showSection('secLogin');
+    setStep(1);
+  }
+
+  function resetToTopics() {
+    state.topicId   = null;
+    state.topicName = '';
+    document.querySelectorAll('.topic-pill').forEach(p=>p.classList.remove('selected'));
+    document.getElementById('btnStart').disabled = true;
+    showSection('secTopic');
+    setStep(2);
+  }
+
+  /* ===============================================================
+    BOOT
+  =============================================================== */
+  document.addEventListener('DOMContentLoaded', () => {
+    setStep(1);
+    document.getElementById('inputStudentId').focus();
   });
-}
 
-function showFeedback(result, correct) {
-  const fb   = result.feedback ?? result.explanation ?? result.message ?? '';
-  const block = document.getElementById('feedbackBlock');
-  block.innerHTML = `
-    <div class="feedback-card ${correct?'correct-fb':'wrong-fb'}">
-      <div class="fb-head">
-        <i class="bi bi-${correct?'patch-check-fill':'info-circle-fill'}" style="font-size:1.1rem;"></i>
-        <span class="fb-title">${correct ? 'Excellent work!' : 'Here\'s what to know'}</span>
-        <button class="btn-tts ms-auto" onclick="speakRaw(${JSON.stringify(fb)})" title="Listen to feedback">
-          <i class="bi bi-volume-up-fill"></i> Listen
-        </button>
-      </div>
-      <div class="fb-body">${fb ? esc(fb) : '<em style="opacity:.6">No written feedback provided.</em>'}</div>
-    </div>`;
-  block.style.display = 'block';
-}
-
-/* ===============================================================
-   SESSION PROGRESS BAR
-=============================================================== */
-function updateSessionBar() {
-  const { correct, answered } = state.session;
-  document.getElementById('sbCorrect').textContent  = correct;
-  document.getElementById('sbAnswered').textContent = answered;
-  const pct = answered>0 ? Math.round((correct/answered)*100) : 0;
-  document.getElementById('sbBarFill').style.width  = pct+'%';
-}
-
-/* ===============================================================
-   TTS — Edge TTS via /api/tts
-=============================================================== */
-async function speakQuestion() {
-  const txt = state.question?.question ?? state.question?.question_text ?? '';
-  if (txt.trim()) await speakRaw(txt);
-}
-
-async function speakRaw(text) {
-  if (!text?.trim()) return;
-  const audio = document.getElementById('ttsAudio');
-  document.querySelectorAll('.btn-tts').forEach(b=>{ b.classList.add('playing'); b.disabled=true; });
-
-  try {
-    const res = await fetch(`${API}/tts?text=${encodeURIComponent(text)}`);
-    if (!res.ok) throw new Error(`TTS error (${res.status})`);
-    const blob = await res.blob();
-    if (ttsAudioURL) URL.revokeObjectURL(ttsAudioURL);
-    ttsAudioURL = URL.createObjectURL(blob);
-    audio.src   = ttsAudioURL;
-    await audio.play();
-  } catch(err) {
-    toast('Could not play audio: ' + err.message, 'err');
-  } finally {
-    document.querySelectorAll('.btn-tts').forEach(b=>{ b.classList.remove('playing'); b.disabled=false; });
-  }
-}
-
-/* ===============================================================
-   STT — Groq Whisper via /api/stt
-=============================================================== */
-async function sendSttFile(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const resultEl = document.getElementById('sttMiniResult');
-  const btnEl    = document.getElementById('sttUploadBtn');
-  resultEl.textContent = 'Transcribing with Groq Whisper…';
-  resultEl.style.color = 'var(--ink)';
-  resultEl.style.fontStyle = 'italic';
-  btnEl.style.opacity = '0.6';
-
-  try {
-    const fd = new FormData();
-    fd.append('file', file);
-    const res = await fetch(`${API}/stt`, { method:'POST', body:fd });
-    if (!res.ok) throw new Error(`STT error (${res.status})`);
-    const data = await res.json();
-    const text = data.text ?? data.transcript ?? JSON.stringify(data);
-    resultEl.textContent = `"${text}"`;
-    resultEl.style.fontStyle = 'normal';
-    toast('Voice captured!', 'ok');
-  } catch(err) {
-    resultEl.textContent = 'Error: ' + err.message;
-    resultEl.style.color = 'var(--wrong)';
-    toast('Voice input failed', 'err');
-  } finally {
-    btnEl.style.opacity = '1';
-    input.value = '';
-  }
-}
-
-/* ===============================================================
-   NAVIGATION
-=============================================================== */
-function resetToLogin() {
-  state.student = null;
-  state.topicId = null;
-  document.getElementById('profileBanner').style.display = 'none';
-  document.getElementById('loginErr').style.display      = 'none';
-  document.getElementById('inputStudentId').value        = '';
-  showSection('secLogin');
-  setStep(1);
-}
-
-function resetToTopics() {
-  state.topicId   = null;
-  state.topicName = '';
-  document.querySelectorAll('.topic-pill').forEach(p=>p.classList.remove('selected'));
-  document.getElementById('btnStart').disabled = true;
-  showSection('secTopic');
-  setStep(2);
-}
-
-/* ===============================================================
-   BOOT
-=============================================================== */
-document.addEventListener('DOMContentLoaded', () => {
-  setStep(1);
-  document.getElementById('inputStudentId').focus();
-});
 </script>
 </body>
 </html>

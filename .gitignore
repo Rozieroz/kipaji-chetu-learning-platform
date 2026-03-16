@@ -1,4 +1,6 @@
 .env
+.env.production
+.env.development
 
 
 # Python cache and build files to ignore
@@ -16,3 +18,5 @@ build/
 .eggs/
 *.egg-info/
 *.egg
+
+files.zip
